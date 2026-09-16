@@ -1,0 +1,12 @@
+[package]
+name = "pxa-cli"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "pxa"
+path = "src/main.rs"
+
+[dependencies]
+pxa-core = { path = "../../crates/pxa-core" }

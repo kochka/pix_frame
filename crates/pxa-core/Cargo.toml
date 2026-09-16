@@ -1,0 +1,8 @@
+[package]
+name = "pxa-core"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"

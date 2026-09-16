@@ -1,0 +1,20 @@
+# Cargo build output
+/target/
+**/target/
+
+# Local Mise configuration
+.mise.local.toml
+
+# Editor configuration
+.vscode/
+.zed/
+.helix/
+.nvim.lua
+.idea/
+
+# rustfmt backup files
+**/*.rs.bk
+
+# Platform-specific files
+*.pdb
+**/.DS_Store
