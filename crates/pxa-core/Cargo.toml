@@ -1,8 +1,6 @@
 [package]
 name = "pxa-core"
+description = "Shared, allocation-free implementation of the PXA animation format"
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
-
-[lib]
-path = "src/lib.rs"

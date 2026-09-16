@@ -8,15 +8,15 @@ run = "cargo fmt --all -- --check"
 
 [tasks.test]
 description = "Run host-side tests"
-run = "cargo test -p pxa-core -p pxa-cli"
+run = "cargo test -p pxa-core -p pxa"
 
 [tasks.lint]
 description = "Lint host-side workspace packages"
-run = "cargo clippy -p pxa-core -p pxa-cli --all-targets -- -D warnings"
+run = "cargo clippy -p pxa-core -p pxa --all-targets -- -D warnings"
 
-[tasks.build-cli]
+[tasks.build-pxa]
 description = "Build the desktop PXA CLI"
-run = "cargo build -p pxa-cli --release"
+run = "cargo build -p pxa --release"
 
 [tasks.build-firmware]
 description = "Build the ESP32-C6 firmware"
@@ -24,4 +24,8 @@ run = "cargo build -p pix-frame-firmware --release --target riscv32imac-unknown-
 
 [tasks.check]
 description = "Run host-side formatting, tests, linting, and CLI build"
-depends = ["fmt-check", "test", "lint", "build-cli"]
+depends = ["fmt-check", "test", "lint", "build-pxa"]
+
+[tasks.clean]
+description = "Remove all build artifacts (host and firmware)"
+run = "cargo clean"

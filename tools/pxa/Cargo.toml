@@ -1,12 +1,13 @@
 [package]
-name = "pxa-cli"
+name = "pxa"
+description = "Converts animations to the PXA format and inspects PXA files"
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
-[[bin]]
-name = "pxa"
-path = "src/main.rs"
-
 [dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+color_quant = "2.0.0"
+image = { version = "0.25.10", default-features = false, features = ["gif", "png", "webp"] }
 pxa-core = { path = "../../crates/pxa-core" }

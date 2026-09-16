@@ -666,12 +666,15 @@ The player decides whether the animation loops. Looping is not encoded in PXA v1
 Suggested command-line interface:
 
 ```bash
-pxa import cat.gif cat.pxa
-pxa import animation.png animation.pxa
+pxa convert cat.gif                      # writes cat.pxa next to the source
+pxa convert animation.png -o out/anim.pxa
+pxa convert *.gif -o animations/         # bulk: one .pxa per input, same name
 pxa inspect cat.pxa
 pxa preview cat.pxa
 pxa validate cat.pxa
 ```
+
+`convert` accepts one or more inputs. Each output takes the input's name with a `.pxa` extension, next to the input by default or inside the directory given with `--output`. Inputs that would produce the same output path are rejected before any conversion starts. With several inputs, a failing file is reported and skipped, the remaining files are still converted, and the exit status is non-zero. Conversion options apply to every input of the invocation.
 
 Possible inputs:
 
@@ -717,7 +720,7 @@ Source durations are handled as follows:
 - When the user supplies a default duration, every zero-duration source frame is emitted with that duration instead of being omitted. This matters for older GIF files in which every frame has a delay of zero; browsers typically display such files at about 100 ms per frame, and omitting every frame would otherwise make conversion fail. Example:
 
   ```bash
-  pxa import old.gif old.pxa --default-duration 100
+  pxa convert old.gif --default-duration 100
   ```
 - A source duration greater than 65,535 ms is clamped to 65,535 ms. The compiler does not duplicate frames to preserve the excess duration.
 - Durations from 1 to 65,535 ms are preserved.
@@ -727,7 +730,7 @@ The file header's `frame_count` must count emitted PXA frames. If no frames rema
 The compiler should select the smallest acceptable global palette. For photographic or high-color inputs it may quantize to a configurable maximum:
 
 ```bash
-pxa import source.gif output.pxa --colors 16
+pxa convert source.gif --colors 16
 ```
 
 ---
@@ -833,10 +836,10 @@ PXA is conceptually inspired by reverse-engineered Divoom animation encoding:
 
 PXA is an independent format. Divoom-specific download, decryption, parsing, and conversion belong in PC-side tooling. The firmware only reads PXA.
 
-Possible future command:
+Possible future support:
 
 ```bash
-pxa import-divoom animation.divoom16 output.pxa
+pxa convert animation.divoom16
 ```
 
 ---
