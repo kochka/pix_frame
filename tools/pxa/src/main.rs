@@ -1,7 +1,9 @@
-//! `pxa`: desktop tool that converts animations to the PXA format and
-//! inspects PXA files. See `doc/PXA_spec.md` section 17.
+//! `pxa`: desktop tool that converts animations to the PXA format, bundles
+//! them for the frame and inspects PXA files. See `doc/PXA_spec.md`
+//! sections 4 and 17.
 
 mod animation;
+mod bundle;
 mod convert;
 mod import;
 mod inspect;
@@ -25,6 +27,8 @@ struct Cli {
 enum Command {
     /// Convert one or more GIF, PNG, APNG or WebP animations to PXA.
     Convert(ConvertArgs),
+    /// Concatenate PXA files into a raw image for the animations partition.
+    Bundle(BundleArgs),
     /// Print the header, palette and frame list of a PXA file.
     Inspect { file: PathBuf },
     /// Check that a file is a conforming PXA v1 file.
@@ -55,6 +59,16 @@ struct ConvertArgs {
     colors: u16,
 }
 
+#[derive(Args)]
+struct BundleArgs {
+    /// PXA files, stored in this order. Every file is validated first.
+    #[arg(required = true)]
+    inputs: Vec<PathBuf>,
+    /// Image to write, e.g. `animations.bin`.
+    #[arg(short, long)]
+    output: PathBuf,
+}
+
 fn parse_size(text: &str) -> Result<(u16, u16)> {
     let (w, h) = text
         .split_once(['x', 'X', '×'])
@@ -79,6 +93,7 @@ fn parse_color(text: &str) -> Result<Rgb> {
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Convert(args) => convert_all(&args),
+        Command::Bundle(args) => bundle_all(&args),
         Command::Inspect { file } => {
             let bytes =
                 std::fs::read(&file).with_context(|| format!("cannot read {}", file.display()))?;
@@ -195,6 +210,53 @@ fn convert_all(args: &ConvertArgs) -> Result<()> {
     }
     if failures > 0 {
         bail!("{failures} of {} conversions failed", pairs.len());
+    }
+    Ok(())
+}
+
+fn bundle_all(args: &BundleArgs) -> Result<()> {
+    let (image, placements) = bundle::bundle(&args.inputs)?;
+    std::fs::write(&args.output, &image)
+        .with_context(|| format!("cannot write {}", args.output.display()))?;
+    for (input, placed) in args.inputs.iter().zip(&placements) {
+        println!(
+            "{:#08x}  {:>7} bytes  {}x{}, {} frames  {}",
+            placed.offset,
+            placed.len,
+            placed.width,
+            placed.height,
+            placed.frame_count,
+            input.display()
+        );
+    }
+    println!(
+        "{}: {} animations, {} bytes",
+        args.output.display(),
+        placements.len(),
+        image.len()
+    );
+
+    // The firmware skips files that do not match the display, so flag any
+    // size that differs from the majority of the bundle.
+    let mut sizes: HashMap<(u16, u16), usize> = HashMap::new();
+    for placed in &placements {
+        *sizes.entry((placed.width, placed.height)).or_default() += 1;
+    }
+    if let Some(((width, height), _)) = sizes.iter().max_by_key(|(_, count)| **count)
+        && sizes.len() > 1
+    {
+        for (input, placed) in args.inputs.iter().zip(&placements) {
+            if (placed.width, placed.height) != (*width, *height) {
+                eprintln!(
+                    "warning: {} is {}x{} while most files are {}x{}; the frame will skip it",
+                    input.display(),
+                    placed.width,
+                    placed.height,
+                    width,
+                    height
+                );
+            }
+        }
     }
     Ok(())
 }
