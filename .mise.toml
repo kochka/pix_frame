@@ -22,6 +22,23 @@ run = "cargo build -p pxa --release"
 description = "Build the ESP32-C6 firmware"
 run = "cargo build -p pix-frame-firmware --release --target riscv32imac-unknown-none-elf"
 
+[tasks.flash]
+description = "Flash the firmware with partitions.csv and open the serial monitor"
+run = "cargo run -p pix-frame-firmware --release --target riscv32imac-unknown-none-elf"
+
+[tasks.bundle-assets]
+description = "Bundle assets/*.pxa into target/animations.bin"
+depends = ["build-pxa"]
+run = "target/release/pxa bundle assets/*.pxa -o target/animations.bin"
+
+[tasks.flash-assets]
+description = "Write the animation bundle to the `animations` partition (offset/size from partitions.csv)"
+depends = ["bundle-assets"]
+run = """
+espflash erase-region --chip esp32c6 0x410000 0x3F0000
+espflash write-bin --chip esp32c6 0x410000 target/animations.bin
+"""
+
 [tasks.check]
 description = "Run host-side formatting, tests, linting, and CLI build"
 depends = ["fmt-check", "test", "lint", "build-pxa"]

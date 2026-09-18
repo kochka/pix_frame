@@ -85,33 +85,44 @@ PXA is not guaranteed to be smaller than GIF. Its primary advantage is simple, p
 
 ## 4. Storage on the ESP32
 
-Animations should normally be stored independently from the firmware in a dedicated data partition, preferably LittleFS.
+Animations are stored independently from the firmware in a dedicated data partition so they can be replaced without rebuilding the application.
+
+### 4.1 Partition layout
+
+The reference firmware uses the ESP-IDF partition table in `partitions.csv` (8 MB flash):
 
 ```text
-8 MB flash
-
-├── bootloader
-├── partition table
-├── NVS / settings
-├── firmware slot A
-├── firmware slot B        # optional OTA
-└── animations filesystem
-    ├── cat.pxa
-    ├── ghost.pxa
-    ├── pacman.pxa
-    └── weather.pxa
+name        type  subtype    offset    size
+nvs         data  nvs        0x9000    0x6000      24 KiB, reserved
+phy_init    data  phy        0xF000    0x1000      4 KiB, reserved
+factory     app   factory    0x10000   0x200000    2 MiB firmware
+(free)                       0x210000  0x200000    reserved for a future OTA slot and otadata
+animations  data  undefined  0x410000  0x3F0000    3.94 MiB PXA bundle
 ```
 
-A possible starting allocation is:
+The gap before `animations` keeps its offset stable if OTA is added later. The firmware locates the partition by its label at boot rather than by a compiled-in offset; the offset and size are still repeated in the `flash-assets` task of `.mise.toml`, which must be kept in sync with `partitions.csv`.
+
+### 4.2 Bundle format
+
+The `animations` partition holds a **bundle**: complete PXA files concatenated back to back, in the order they should be indexed, with no padding, alignment or directory, followed by an **end marker** of four `0x00` bytes.
 
 ```text
-~2 MB  firmware A
-~2 MB  firmware B
-~3 MB  animations
-rest   bootloader / NVS / partition table / metadata
+offset 0        PXA file 1
+offset size_1   PXA file 2
+...
+offset Σ size   00 00 00 00
 ```
 
-Exact partition sizes are implementation-dependent. Separating assets from firmware makes it possible to add or replace animations without rebuilding the application.
+No directory is needed because every file's size follows from its header (section 15). A reader walks the bundle as follows:
+
+1. If fewer than 16 bytes remain, stop.
+2. Read the 16-byte header. If it does not start with `PXA1`, stop. Four `0x00` or four `0xFF` bytes (erased flash) are the normal end; anything else indicates a damaged bundle.
+3. Validate the header and compute `file_size`. If the file would run past the end of the partition, stop.
+4. Record `(offset, file_size)` and continue at `offset + file_size`.
+
+Only headers are checked while indexing; frames are validated when played (section 18). The reference firmware indexes at most 256 files, ignores the rest and logs a warning when that happens. The end marker matters because a new, shorter bundle written over an old one would otherwise be followed by stale but well-formed files.
+
+The bundle is produced by `pxa bundle` (section 17) and written to the partition with `espflash write-bin` after erasing it. LittleFS remains an option for a future version with per-file updates over USB or Wi-Fi; the firmware reads the bundle through a small byte-source abstraction so the storage backend can change without touching the player.
 
 `include_bytes!()` remains suitable for a few built-in or recovery assets, but it is not the default storage strategy.
 
@@ -669,12 +680,15 @@ Suggested command-line interface:
 pxa convert cat.gif                      # writes cat.pxa next to the source
 pxa convert animation.png -o out/anim.pxa
 pxa convert *.gif -o animations/         # bulk: one .pxa per input, same name
+pxa bundle *.pxa -o animations.bin       # image for the animations partition
 pxa inspect cat.pxa
 pxa preview cat.pxa
 pxa validate cat.pxa
 ```
 
 `convert` accepts one or more inputs. Each output takes the input's name with a `.pxa` extension, next to the input by default or inside the directory given with `--output`. Inputs that would produce the same output path are rejected before any conversion starts. With several inputs, a failing file is reported and skipped, the remaining files are still converted, and the exit status is non-zero. Conversion options apply to every input of the invocation.
+
+`bundle` validates every input as a complete PXA file, concatenates them in the given order and appends the end marker described in section 4.2. Any invalid input aborts the whole bundle. It prints the offset of each file inside the image and the total size, so the caller can check it against the partition size.
 
 Possible inputs:
 

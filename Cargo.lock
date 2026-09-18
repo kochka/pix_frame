@@ -1278,6 +1278,8 @@ dependencies = [
  "esp-hal",
  "esp-hal-smartled",
  "esp-println",
+ "esp-storage",
+ "pxa-core",
  "smart-leds",
 ]
 

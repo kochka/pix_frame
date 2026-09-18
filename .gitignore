@@ -2,6 +2,9 @@
 /target/
 **/target/
 
+# Assets
+/assets/
+
 # Local Mise configuration
 .mise.local.toml
 

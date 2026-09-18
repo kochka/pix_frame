@@ -15,7 +15,10 @@ GIF / APNG / WebP / PNG
    pxa convert (PC)
           │
           ▼
-    animation.pxa  ──►  ESP32-C6 firmware  ──►  WS2815 LED matrix
+    animation.pxa
+          │
+          ▼
+    pxa bundle (PC)  ──►  animations partition  ──►  ESP32-C6 firmware  ──►  WS2815 LED matrix
 ```
 
 ## Hardware
@@ -37,7 +40,8 @@ agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details.
 | --- | --- |
 | `crates/pxa-core` | `no_std`, allocation-free implementation of the PXA format, shared by the firmware and the converter |
 | `firmware` | ESP32-C6 application built on `esp-hal` |
-| `tools/pxa` | Desktop CLI that converts animations to PXA and inspects PXA files |
+| `tools/pxa` | Desktop CLI that converts animations to PXA, bundles them and inspects PXA files |
+| `partitions.csv` | Flash partition table: firmware, reserved OTA space, `animations` data partition |
 | `doc/PXA_spec.md` | Authoritative specification of the PXA binary format |
 | `doc/wiring.md` | Electrical wiring and physical LED layout |
 | `AGENTS.md` | Development guidelines for humans and coding agents |
@@ -85,19 +89,57 @@ mise run build-firmware
 cargo build -p pix-frame-firmware --release --target riscv32imac-unknown-none-elf
 ```
 
-Flash and open the serial monitor (uses the `espflash` runner configured in
-`.cargo/config.toml`):
+Flash and open the serial monitor. The `espflash` runner in
+`.cargo/config.toml` applies `partitions.csv`, so run this from the workspace
+root:
 
 ```bash
+mise run flash
+# or
 cargo run -p pix-frame-firmware --release --target riscv32imac-unknown-none-elf
 ```
 
 A plain `cargo build` at the workspace root only builds the host packages; the
 firmware always needs the explicit `-p` and `--target`.
 
+### Loading animations onto the frame
+
+Animations live in the `animations` partition, separate from the firmware,
+as a bundle of PXA files (see the spec, section 4). Put your `.pxa` files in
+`assets/` (ignored by git) and run:
+
+```bash
+mise run flash-assets
+```
+
+This builds the bundle with `pxa bundle assets/*.pxa -o target/animations.bin`,
+erases the partition and writes the image at its offset with `espflash`.
+Reflashing the firmware does not touch the animations, and vice versa.
+
+### Firmware behavior
+
+At boot the firmware reads the partition table, indexes the bundle (up to 256
+animations) and logs what it found over the serial port, including a warning
+when indexing stopped before the end of the bundle. It then plays in a
+random order: each cycle is a shuffle of every animation, and a new cycle never
+starts with the animation that just ended. An animation loops until at least
+3 seconds have been scheduled at a loop boundary, so short loops repeat and long
+ones play once in full.
+
+Frames are scheduled on cumulative deadlines from the first frame: the next
+frame is decoded while the current one is displayed, then sent when its
+predecessor's duration has elapsed. Decoding and LED transmission time do not
+accumulate as drift. A late frame is shown as soon as it is ready and the
+schedule is not rebased.
+
+Files whose dimensions differ from the matrix, or that fail validation, are
+logged and skipped. Without any playable animation the LED self-test runs
+instead. Output brightness and the minimum play time are constants at the top
+of `firmware/src/main.rs`.
+
 ## Using the `pxa` converter
 
-The binary is produced at `target/release/pxa`. It has three commands.
+The binary is produced at `target/release/pxa`. It has four commands.
 
 ### `pxa convert`
 
@@ -179,6 +221,31 @@ frames:
 total:       350 ms per loop
 ```
 
+### `pxa bundle`
+
+Validates PXA files and concatenates them, in the given order, into the raw
+image expected by the `animations` partition. The image ends with a four-byte
+marker so the firmware stops at the last file even if the partition previously
+held a larger bundle. Any invalid input aborts the bundle. Files whose dimensions differ from the
+rest of the bundle are reported, since the firmware skips them.
+
+```bash
+pxa bundle assets/*.pxa -o animations.bin
+```
+
+```text
+0x000000     3871 bytes  16x16, 14 frames  assets/batman.pxa
+0x000f1f      581 bytes  16x16, 4 frames  assets/bissie.pxa
+animations.bin: 2 animations, 4456 bytes
+```
+
+Write it to the frame with `mise run flash-assets`, or by hand:
+
+```bash
+espflash erase-region --chip esp32c6 0x410000 0x3F0000
+espflash write-bin --chip esp32c6 0x410000 animations.bin
+```
+
 ### `pxa validate`
 
 Checks that a file is a conforming PXA v1 file and exits with a non-zero
@@ -202,12 +269,13 @@ Done:
 
 - PXA v1 specification;
 - `pxa-core` encoder, decoder and validation, with byte-exact tests;
-- `pxa` converter with `convert` (single or bulk), `inspect` and `validate`;
+- `pxa` converter with `convert` (single or bulk), `bundle`, `inspect` and `validate`;
+- firmware PXA player streaming from a dedicated flash partition, random
+  playlist with a minimum play time;
 - firmware LED self-test with a configurable matrix layout.
 
 Not yet:
 
-- firmware PXA player and LittleFS animation storage;
 - `pxa preview`;
 - Aseprite and Divoom importers;
 - uploading animations to the frame without reflashing.

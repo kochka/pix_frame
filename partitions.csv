@@ -1,0 +1,12 @@
+# ESP-IDF partition table for pix-frame on an 8 MB flash.
+# Documented in doc/PXA_spec.md section 4. The `animations` offset and size
+# are also used by the `flash-assets` task in .mise.toml.
+#
+# 0x210000..0x40FFFF (2 MB) is intentionally left unallocated for a future
+# OTA slot and `otadata` partition so `animations` never has to move.
+#
+# Name,      Type, SubType,   Offset,   Size
+nvs,         data, nvs,       0x9000,   0x6000
+phy_init,    data, phy,       0xF000,   0x1000
+factory,     app,  factory,   0x10000,  0x200000
+animations,  data, undefined, 0x410000, 0x3F0000

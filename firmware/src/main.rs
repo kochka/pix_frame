@@ -7,18 +7,25 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use defmt::error;
+use defmt::{error, info, warn};
+use esp_bootloader_esp_idf::partitions::{self, PARTITION_TABLE_MAX_LEN};
 use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::main;
 use esp_hal::rmt::Rmt;
-use esp_hal::time::Rate;
+use esp_hal::rng::Rng;
+use esp_hal::time::{Duration, Instant, Rate};
 use esp_hal_smartled::{RmtSmartLeds, buffer_size, color_order};
 use esp_println as _;
+use esp_storage::FlashStorage;
+use pix_frame_firmware::catalog::{Catalog, Entry, ScanEnd};
 use pix_frame_firmware::display::{MatrixLayout, Wiring};
+use pix_frame_firmware::player::{PlayError, Player};
+use pix_frame_firmware::playlist::Playlist;
 use pix_frame_firmware::self_test;
-use smart_leds::RGB8;
+use pix_frame_firmware::storage::{ByteSource, FlashPartition};
+use smart_leds::{RGB8, SmartLedsWrite, brightness};
 
 // Physical description of the attached frame. This is the only place in the
 // firmware that knows the matrix dimensions, wiring and channel order.
@@ -29,6 +36,20 @@ const LAYOUT: MatrixLayout = MatrixLayout {
     wiring: Wiring::Serpentine,
 };
 const LED_COUNT: usize = LAYOUT.led_count();
+
+/// Global output brightness, 0..=255. Keep it modest: 256 WS2815 at full
+/// white draw far more than a small supply can deliver.
+const BRIGHTNESS: u8 = 60;
+
+/// An animation loops until at least this much scheduled time has elapsed at
+/// a loop boundary, then the next one starts.
+const MIN_PLAY_TIME: Duration = Duration::from_millis(3_000);
+
+/// Pause after a failed animation so a broken bundle does not spin the log.
+const ERROR_BACKOFF: Duration = Duration::from_millis(500);
+
+/// Label of the partition holding the PXA bundle. See `partitions.csv`.
+const ANIMATIONS_PARTITION: &str = "animations";
 
 type LedDriver<'d> =
     RmtSmartLeds<'d, { buffer_size::<RGB8>(LED_COUNT) }, Blocking, RGB8, color_order::Grb>;
@@ -49,14 +70,11 @@ esp_bootloader_esp_idf::esp_app_desc!();
 )]
 #[main]
 fn main() -> ! {
-    // generator version: 1.3.0
-    // generator parameters: --chip esp32c6 -o unstable-hal -o zed -o defmt -o stable-x86_64-unknown-linux-gnu
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // Le cadre de LED WS2815 est relie au GPIO18.
-    // Le peripherique RMT genere le signal precis attendu par les LED.
+    // The WS2815 frame is wired to GPIO18; the RMT peripheral generates the
+    // precisely timed signal the LEDs expect.
     let rmt_frequency = Rate::from_mhz(80);
     let rmt = Rmt::new(peripherals.RMT, rmt_frequency).unwrap();
     let mut led = LedDriver::new_with_memsize(
@@ -71,9 +89,140 @@ fn main() -> ! {
     let delay = Delay::new();
     let mut pixels = [RGB8::new(0, 0, 0); LED_COUNT];
 
-    loop {
-        self_test::run(&mut led, &LAYOUT, &mut pixels, &delay);
+    let mut flash = FlashStorage::new(peripherals.FLASH);
+    let mut table_bytes = [0u8; PARTITION_TABLE_MAX_LEN];
+    let (offset, len) = match find_partition(&mut flash, &mut table_bytes, ANIMATIONS_PARTITION) {
+        Some(window) => window,
+        None => {
+            error!(
+                "partition '{}' not found, running the self-test",
+                ANIMATIONS_PARTITION
+            );
+            self_test_forever(&mut led, &mut pixels, &delay);
+        }
+    };
+    let mut source = match FlashPartition::new(&mut flash, offset, len) {
+        Ok(source) => source,
+        Err(err) => {
+            error!("partition '{}' unusable: {}", ANIMATIONS_PARTITION, err);
+            self_test_forever(&mut led, &mut pixels, &delay);
+        }
+    };
+
+    let (catalog, end) = Catalog::scan(&mut source);
+    info!(
+        "{} animations in {} bytes at {=u32:#x} ({})",
+        catalog.len(),
+        source.len(),
+        offset,
+        end
+    );
+    if catalog.is_empty() {
+        warn!("no animations found, running the self-test");
+        self_test_forever(&mut led, &mut pixels, &delay);
+    }
+    if !matches!(end, ScanEnd::Terminator | ScanEnd::EndOfSource) {
+        warn!("bundle indexing stopped early: {}", end);
     }
 
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
+    let rng = Rng::new();
+    let mut random = || rng.random();
+    let mut playlist = Playlist::new(catalog.len(), &mut random);
+
+    loop {
+        let Some(entry) = playlist
+            .next(&mut random)
+            .and_then(|index| catalog.get(index))
+        else {
+            continue;
+        };
+        let header = &entry.header;
+        info!(
+            "playing animation at {=u32:#x}: {} frames, {} colors",
+            entry.offset,
+            header.frame_count(),
+            header.palette_size()
+        );
+        if let Err(err) = play(&mut led, &mut source, entry, &mut pixels, &delay) {
+            warn!("animation at {=u32:#x}: {}", entry.offset, err);
+            delay.delay(ERROR_BACKOFF);
+        }
+    }
+}
+
+/// Offset and size of the partition labelled `label`, from the table in flash.
+fn find_partition(
+    flash: &mut FlashStorage<'_>,
+    table_bytes: &mut [u8; PARTITION_TABLE_MAX_LEN],
+    label: &str,
+) -> Option<(u32, u32)> {
+    let table = match partitions::read_partition_table(flash, table_bytes) {
+        Ok(table) => table,
+        Err(err) => {
+            error!("cannot read the partition table: {}", err);
+            return None;
+        }
+    };
+    table
+        .iter()
+        .find(|entry| entry.label_as_str() == label)
+        .map(|entry| (entry.offset(), entry.len()))
+}
+
+/// Plays one animation with deadline-based scheduling.
+///
+/// Frame `i + 1` is decoded while frame `i` is displayed, then sent exactly
+/// when frame `i`'s duration has elapsed. Deadlines accumulate from the
+/// first frame, so decoding and LED transmission time never add drift. A
+/// late frame is shown as soon as it is ready; the schedule is not rebased.
+/// The animation loops until [`MIN_PLAY_TIME`] is reached at a loop boundary
+/// and the last frame keeps its full duration before returning.
+#[allow(
+    clippy::large_stack_frames,
+    reason = "the player state is bounded by the display size (palette plus one packed frame)"
+)]
+fn play<S: ByteSource>(
+    led: &mut LedDriver<'_>,
+    source: &mut S,
+    entry: &Entry,
+    pixels: &mut [RGB8; LED_COUNT],
+    delay: &Delay,
+) -> Result<(), PlayError> {
+    let mut player = Player::<LED_COUNT>::open(source, entry, &LAYOUT)?;
+    let mut deadline = Instant::now();
+    let mut scheduled = Duration::ZERO;
+
+    loop {
+        let frame = player.next_frame(source, &LAYOUT, pixels)?;
+        wait_until(deadline, delay);
+        show(led, pixels);
+
+        let duration = Duration::from_millis(u64::from(frame.duration_ms));
+        deadline += duration;
+        scheduled += duration;
+
+        if frame.is_last && scheduled >= MIN_PLAY_TIME {
+            wait_until(deadline, delay);
+            return Ok(());
+        }
+    }
+}
+
+fn wait_until(deadline: Instant, delay: &Delay) {
+    let now = Instant::now();
+    if now < deadline {
+        delay.delay(deadline - now);
+    }
+}
+
+fn show(led: &mut LedDriver<'_>, pixels: &[RGB8]) {
+    if let Err(err) = led.write(brightness(pixels.iter().copied(), BRIGHTNESS)) {
+        error!("LED write failed: {}", defmt::Debug2Format(&err));
+    }
+}
+
+fn self_test_forever(led: &mut LedDriver<'_>, pixels: &mut [RGB8; LED_COUNT], delay: &Delay) -> ! {
+    loop {
+        self_test::run(led, &LAYOUT, pixels, delay);
+    }
 }
