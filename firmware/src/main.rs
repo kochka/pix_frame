@@ -12,6 +12,7 @@ use esp_bootloader_esp_idf::partitions::{self, PARTITION_TABLE_MAX_LEN};
 use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
+use esp_hal::gpio::{Input, InputConfig, Pull};
 use esp_hal::main;
 use esp_hal::rmt::Rmt;
 use esp_hal::rng::Rng;
@@ -88,6 +89,13 @@ fn main() -> ! {
 
     let delay = Delay::new();
     let mut pixels = [RGB8::new(0, 0, 0); LED_COUNT];
+    // Self-test button: GPIO9 is the BOOT button of the Espressif ESP32-C6
+    // dev boards, pulled up and low when pressed. Any GPIO with a button to
+    // ground works the same way. See `doc/wiring.md` section 6.
+    let mut button = Button::new(Input::new(
+        peripherals.GPIO9,
+        InputConfig::default().with_pull(Pull::Up),
+    ));
 
     let mut flash = FlashStorage::new(peripherals.FLASH);
     let mut table_bytes = [0u8; PARTITION_TABLE_MAX_LEN];
@@ -143,11 +151,54 @@ fn main() -> ! {
             header.frame_count(),
             header.palette_size()
         );
-        if let Err(err) = play(&mut led, &mut source, entry, &mut pixels, &delay) {
-            warn!("animation at {=u32:#x}: {}", entry.offset, err);
-            delay.delay(ERROR_BACKOFF);
+        match play(
+            &mut led,
+            &mut source,
+            entry,
+            &mut pixels,
+            &delay,
+            &mut button,
+        ) {
+            Ok(PlayEnd::Finished) => {}
+            Ok(PlayEnd::Interrupted) => {
+                info!("self-test button pressed");
+                self_test::run(&mut led, &LAYOUT, &mut pixels, &delay);
+            }
+            Err(err) => {
+                warn!("animation at {=u32:#x}: {}", entry.offset, err);
+                delay.delay(ERROR_BACKOFF);
+            }
         }
     }
+}
+
+/// Active-low push button that reports each press once.
+struct Button {
+    input: Input<'static>,
+    held: bool,
+}
+
+impl Button {
+    fn new(input: Input<'static>) -> Self {
+        Self { input, held: false }
+    }
+
+    /// True on the first poll after the button went down; false until it is
+    /// released and pressed again.
+    fn take_press(&mut self) -> bool {
+        let down = self.input.is_low();
+        let pressed = down && !self.held;
+        self.held = down;
+        pressed
+    }
+}
+
+/// Why [`play`] returned.
+enum PlayEnd {
+    /// The minimum play time was reached at a loop boundary.
+    Finished,
+    /// The self-test button was pressed.
+    Interrupted,
 }
 
 /// Offset and size of the partition labelled `label`, from the table in flash.
@@ -176,7 +227,8 @@ fn find_partition(
 /// first frame, so decoding and LED transmission time never add drift. A
 /// late frame is shown as soon as it is ready; the schedule is not rebased.
 /// The animation loops until [`MIN_PLAY_TIME`] is reached at a loop boundary
-/// and the last frame keeps its full duration before returning.
+/// and the last frame keeps its full duration before returning. The button is
+/// polled at every frame boundary.
 #[allow(
     clippy::large_stack_frames,
     reason = "the player state is bounded by the display size (palette plus one packed frame)"
@@ -187,7 +239,8 @@ fn play<S: ByteSource>(
     entry: &Entry,
     pixels: &mut [RGB8; LED_COUNT],
     delay: &Delay,
-) -> Result<(), PlayError> {
+    button: &mut Button,
+) -> Result<PlayEnd, PlayError> {
     let mut player = Player::<LED_COUNT>::open(source, entry, &LAYOUT)?;
     let mut deadline = Instant::now();
     let mut scheduled = Duration::ZERO;
@@ -195,6 +248,9 @@ fn play<S: ByteSource>(
     loop {
         let frame = player.next_frame(source, &LAYOUT, pixels)?;
         wait_until(deadline, delay);
+        if button.take_press() {
+            return Ok(PlayEnd::Interrupted);
+        }
         show(led, pixels);
 
         let duration = Duration::from_millis(u64::from(frame.duration_ms));
@@ -203,7 +259,7 @@ fn play<S: ByteSource>(
 
         if frame.is_last && scheduled >= MIN_PLAY_TIME {
             wait_until(deadline, delay);
-            return Ok(());
+            return Ok(PlayEnd::Finished);
         }
     }
 }

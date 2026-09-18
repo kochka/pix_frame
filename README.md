@@ -132,6 +132,9 @@ predecessor's duration has elapsed. Decoding and LED transmission time do not
 accumulate as drift. A late frame is shown as soon as it is ready and the
 schedule is not rebased.
 
+Pressing the BOOT button of the dev board (GPIO9) runs the LED self-test once,
+after which playback resumes with the next animation.
+
 Files whose dimensions differ from the matrix, or that fail validation, are
 logged and skipped. Without any playable animation the LED self-test runs
 instead. Output brightness and the minimum play time are constants at the top

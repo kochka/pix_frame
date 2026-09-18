@@ -147,7 +147,23 @@ place, not a different file format.
 
 ---
 
-## 6. To Confirm on the Physical Frame
+## 6. Self-Test Button
+
+Pressing a button runs the LED self-test once; playback then resumes with the
+next animation. The firmware reads **GPIO9** as an input with the internal
+pull-up enabled and treats a low level as "pressed".
+
+On the Espressif ESP32-C6 dev boards (DevKitC-1, DevKitM-1) GPIO9 is the
+**BOOT** button, so nothing has to be added. GPIO9 is a strapping pin: holding
+it during reset enters the serial download mode, which is harmless here, and
+once the chip has booted it behaves as a normal GPIO. The RESET button is wired
+to EN, not to a GPIO, and cannot be read by the firmware.
+
+For a bare module, wire a push button between the chosen GPIO and GND and
+change the pin in `firmware/src/main.rs`; the internal pull-up makes an
+external resistor unnecessary.
+
+## 7. To Confirm on the Physical Frame
 
 - [ ] How the ESP32-C6 module gets 3.3 V (dev board regulator or external LDO).
 - [ ] Series resistor on the data line and its value.
