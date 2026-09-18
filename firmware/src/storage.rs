@@ -78,3 +78,43 @@ impl ByteSource for FlashPartition<'_, '_> {
             .map_err(|_| StorageError::Device)
     }
 }
+
+/// Adapter giving `esp-nvs` access to the flash through the `embedded-storage`
+/// NOR traits, with the CRC32 computed in software.
+pub struct NvsFlash<'a, 'd>(pub &'a mut FlashStorage<'d>);
+
+impl embedded_storage::nor_flash::ErrorType for NvsFlash<'_, '_> {
+    type Error = esp_storage::FlashStorageError;
+}
+
+impl embedded_storage::nor_flash::ReadNorFlash for NvsFlash<'_, '_> {
+    // `FlashStorage::read` accepts any alignment, so advertise byte reads.
+    const READ_SIZE: usize = 1;
+
+    fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
+        self.0.read(offset, bytes)
+    }
+
+    fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
+}
+
+impl embedded_storage::nor_flash::NorFlash for NvsFlash<'_, '_> {
+    const WRITE_SIZE: usize = FlashStorage::WRITE_SIZE;
+    const ERASE_SIZE: usize = FlashStorage::ERASE_SIZE;
+
+    fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.0.write_nor(offset, bytes)
+    }
+
+    fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+        self.0.erase(from, to)
+    }
+}
+
+impl esp_nvs::platform::Crc for NvsFlash<'_, '_> {
+    fn crc32(init: u32, data: &[u8]) -> u32 {
+        esp_nvs::platform::software_crc32(init, data)
+    }
+}

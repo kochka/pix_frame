@@ -5,6 +5,9 @@
 # Assets
 /assets/
 
+# Device configuration (contains the Wi-Fi password)
+/config.toml
+
 # Local Mise configuration
 .mise.local.toml
 

@@ -93,14 +93,14 @@ The reference firmware uses the ESP-IDF partition table in `partitions.csv` (8 M
 
 ```text
 name        type  subtype    offset    size
-nvs         data  nvs        0x9000    0x6000      24 KiB, reserved
+nvs         data  nvs        0x9000    0x6000      24 KiB, device configuration (ESP-IDF NVS format)
 phy_init    data  phy        0xF000    0x1000      4 KiB, reserved
 factory     app   factory    0x10000   0x200000    2 MiB firmware
 (free)                       0x210000  0x200000    reserved for a future OTA slot and otadata
 animations  data  undefined  0x410000  0x3F0000    3.94 MiB PXA bundle
 ```
 
-The gap before `animations` keeps its offset stable if OTA is added later. The firmware locates the partition by its label at boot rather than by a compiled-in offset; the offset and size are still repeated in the `flash-assets` task of `.mise.toml`, which must be kept in sync with `partitions.csv`.
+The `nvs` partition holds the device configuration (Wi-Fi, location, information-screen interval) written from the PC by `pixframe config build`; it is unrelated to the PXA format. The gap before `animations` keeps its offset stable if OTA is added later. The firmware locates the partition by its label at boot rather than by a compiled-in offset; the offset and size are still repeated in the `flash-assets` task of `.mise.toml`, which must be kept in sync with `partitions.csv`.
 
 ### 4.2 Bundle format
 

@@ -41,6 +41,8 @@ agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details.
 | `crates/pxa-core` | `no_std`, allocation-free implementation of the PXA format, shared by the firmware and the converter |
 | `firmware` | ESP32-C6 application built on `esp-hal` |
 | `tools/pxa` | Desktop CLI that converts animations to PXA, bundles them and inspects PXA files |
+| `tools/pixframe` | Desktop CLI that builds the device configuration image |
+| `config.example.toml` | Template for the device configuration |
 | `partitions.csv` | Flash partition table: firmware, reserved OTA space, `animations` data partition |
 | `doc/PXA_spec.md` | Authoritative specification of the PXA binary format |
 | `doc/wiring.md` | Electrical wiring and physical LED layout |
@@ -116,6 +118,22 @@ This builds the bundle with `pxa bundle assets/*.pxa -o target/animations.bin`,
 erases the partition and writes the image at its offset with `espflash`.
 Reflashing the firmware does not touch the animations, and vice versa.
 
+### Configuring the frame
+
+Optional features (information screens, and later Wi-Fi and weather) are
+driven by a configuration stored in the `nvs` partition. Copy
+`config.example.toml` to `config.toml` (ignored by git, it holds the Wi-Fi
+password), edit it, then:
+
+```bash
+mise run flash-config
+```
+
+This runs `pixframe config build config.toml -o target/nvs.bin` and writes the
+image at the partition offset. `pixframe config dump target/nvs.bin` prints
+what an image contains, without the password. A frame without configuration
+just plays animations.
+
 ### Firmware behavior
 
 At boot the firmware reads the partition table, indexes the bundle (up to 256
@@ -134,6 +152,12 @@ schedule is not rebased.
 
 Pressing the BOOT button of the dev board (GPIO9) runs the LED self-test once,
 after which playback resumes with the next animation.
+
+When `info_every` is set, an information screen is shown for 5 seconds after
+that many animations. Each screen has an availability condition, so it is
+skipped until its data exists: the clock needs the time to have been set by a
+network sync, which is not implemented yet. Hours are drawn above minutes in
+large digits.
 
 Files whose dimensions differ from the matrix, or that fail validation, are
 logged and skipped. Without any playable animation the LED self-test runs
@@ -275,9 +299,14 @@ Done:
 - `pxa` converter with `convert` (single or bulk), `bundle`, `inspect` and `validate`;
 - firmware PXA player streaming from a dedicated flash partition, random
   playlist with a minimum play time;
-- firmware LED self-test with a configurable matrix layout.
+- firmware LED self-test with a configurable matrix layout;
+- device configuration in NVS with the `pixframe` tool, information-screen
+  scheduling and the clock screen rendering.
 
 Not yet:
+
+- Wi-Fi and time synchronisation (the clock screen stays hidden until then);
+- weather and temperature screens;
 
 - `pxa preview`;
 - Aseprite and Divoom importers;

@@ -3,7 +3,10 @@ use core::fmt::Debug;
 use esp_hal::{delay::Delay, rng::Rng};
 use smart_leds::{RGB8, SmartLedsWrite};
 
-use crate::{color::random_vivid, display::MatrixLayout};
+use crate::color::random_vivid;
+use crate::display::{Canvas, MatrixLayout};
+use crate::font::{GLYPH_HEIGHT, draw_text_centered};
+use crate::screens::render_clock;
 
 const TEST_BRIGHTNESS: u8 = 60;
 const BLACK: RGB8 = RGB8::new(0, 0, 0);
@@ -26,6 +29,7 @@ pub fn run<L, const N: usize>(
     test_single_vertical(led, layout, pixels, delay);
     test_random_blink(led, pixels, delay);
     test_random_fill(led, pixels, delay);
+    test_text(led, layout, pixels, delay);
 }
 
 fn random_color() -> RGB8 {
@@ -149,4 +153,27 @@ where
         show(led, pixels);
         delay.delay_millis(10);
     }
+}
+
+/// Renders text and the clock layout through the fonts and the logical mapping.
+fn test_text<L>(led: &mut L, layout: &MatrixLayout, pixels: &mut [RGB8], delay: &Delay)
+where
+    L: SmartLedsWrite<Color = RGB8>,
+    L::Error: Debug,
+{
+    let color = random_color();
+    let mut canvas = Canvas::new(pixels, layout);
+    canvas.clear();
+    let y = layout.height.saturating_sub(GLYPH_HEIGHT) / 2;
+    draw_text_centered(&mut canvas, y, "TEST", color);
+    show(led, pixels);
+    delay.delay_millis(1500);
+
+    let mut canvas = Canvas::new(pixels, layout);
+    render_clock(&mut canvas, 12, 34);
+    show(led, pixels);
+    delay.delay_millis(1500);
+
+    clear(pixels);
+    show(led, pixels);
 }

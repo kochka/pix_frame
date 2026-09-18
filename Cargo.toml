@@ -3,10 +3,12 @@ resolver = "3"
 members = [
     "crates/pxa-core",
     "firmware",
+    "tools/pixframe",
     "tools/pxa",
 ]
 default-members = [
     "crates/pxa-core",
+    "tools/pixframe",
     "tools/pxa",
 ]
 

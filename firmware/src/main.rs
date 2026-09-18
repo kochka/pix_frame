@@ -16,16 +16,20 @@ use esp_hal::gpio::{Input, InputConfig, Pull};
 use esp_hal::main;
 use esp_hal::rmt::Rmt;
 use esp_hal::rng::Rng;
+use esp_hal::rtc_cntl::Rtc;
 use esp_hal::time::{Duration, Instant, Rate};
 use esp_hal_smartled::{RmtSmartLeds, buffer_size, color_order};
 use esp_println as _;
 use esp_storage::FlashStorage;
 use pix_frame_firmware::catalog::{Catalog, Entry, ScanEnd};
-use pix_frame_firmware::display::{MatrixLayout, Wiring};
+use pix_frame_firmware::clock::Clock;
+use pix_frame_firmware::config::{Config, ConfigError};
+use pix_frame_firmware::display::{Canvas, MatrixLayout, Wiring};
 use pix_frame_firmware::player::{PlayError, Player};
 use pix_frame_firmware::playlist::Playlist;
+use pix_frame_firmware::screens;
 use pix_frame_firmware::self_test;
-use pix_frame_firmware::storage::{ByteSource, FlashPartition};
+use pix_frame_firmware::storage::{ByteSource, FlashPartition, NvsFlash};
 use smart_leds::{RGB8, SmartLedsWrite, brightness};
 
 // Physical description of the attached frame. This is the only place in the
@@ -49,8 +53,15 @@ const MIN_PLAY_TIME: Duration = Duration::from_millis(3_000);
 /// Pause after a failed animation so a broken bundle does not spin the log.
 const ERROR_BACKOFF: Duration = Duration::from_millis(500);
 
-/// Label of the partition holding the PXA bundle. See `partitions.csv`.
+/// How long an information screen stays on before animations resume.
+const INFO_SCREEN_TIME: Duration = Duration::from_millis(5_000);
+
+/// Heap used by the NVS reader (and by the network stack later).
+const HEAP_SIZE: usize = 64 * 1024;
+
+/// Labels in `partitions.csv`.
 const ANIMATIONS_PARTITION: &str = "animations";
+const CONFIG_PARTITION: &str = "nvs";
 
 type LedDriver<'d> =
     RmtSmartLeds<'d, { buffer_size::<RGB8>(LED_COUNT) }, Blocking, RGB8, color_order::Grb>;
@@ -71,8 +82,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 )]
 #[main]
 fn main() -> ! {
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let peripherals = esp_hal::init(config);
+    let hal_config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(hal_config);
+    esp_alloc::heap_allocator!(size: HEAP_SIZE);
 
     // The WS2815 frame is wired to GPIO18; the RMT peripheral generates the
     // precisely timed signal the LEDs expect.
@@ -99,6 +111,17 @@ fn main() -> ! {
 
     let mut flash = FlashStorage::new(peripherals.FLASH);
     let mut table_bytes = [0u8; PARTITION_TABLE_MAX_LEN];
+
+    let config = match find_partition(&mut flash, &mut table_bytes, CONFIG_PARTITION) {
+        Some((offset, len)) => load_config(&mut flash, offset, len),
+        None => {
+            warn!("partition '{}' not found, using defaults", CONFIG_PARTITION);
+            Config::default()
+        }
+    };
+    let clock = Clock::new(Rtc::new(peripherals.RTC_TIMER));
+    let mut info_screens = screens::Rotation::default();
+
     let (offset, len) = match find_partition(&mut flash, &mut table_bytes, ANIMATIONS_PARTITION) {
         Some(window) => window,
         None => {
@@ -136,8 +159,24 @@ fn main() -> ! {
     let rng = Rng::new();
     let mut random = || rng.random();
     let mut playlist = Playlist::new(catalog.len(), &mut random);
+    let mut since_info: u8 = 0;
 
     loop {
+        if config.info_every > 0 && since_info >= config.info_every {
+            since_info = 0;
+            match info_screens.pick(&clock) {
+                Some(screen) => {
+                    info!("showing {} screen", screen);
+                    let mut canvas = Canvas::new(&mut pixels, &LAYOUT);
+                    if screens::render(screen, &mut canvas, &clock) {
+                        show(&mut led, &pixels);
+                        delay.delay(INFO_SCREEN_TIME);
+                    }
+                }
+                None => info!("no information screen available yet"),
+            }
+        }
+
         let Some(entry) = playlist
             .next(&mut random)
             .and_then(|index| catalog.get(index))
@@ -199,6 +238,41 @@ enum PlayEnd {
     Finished,
     /// The self-test button was pressed.
     Interrupted,
+}
+
+/// Reads the device configuration from the NVS partition; any problem is
+/// logged and leaves the defaults (no information screens, no network).
+fn load_config(flash: &mut FlashStorage<'_>, offset: u32, len: u32) -> Config {
+    let nvs = esp_nvs::Nvs::new(offset as usize, len as usize, NvsFlash(flash));
+    let mut nvs = match nvs {
+        Ok(nvs) => nvs,
+        Err(err) => {
+            warn!("config partition unreadable: {}", err);
+            return Config::default();
+        }
+    };
+    match Config::load(&mut nvs) {
+        Ok(config) => {
+            info!(
+                "config: info screen every {} animations, wifi {}, location {}",
+                config.info_every,
+                config.wifi.as_ref().map_or("not set", |w| w.ssid.as_str()),
+                config
+                    .location
+                    .as_ref()
+                    .map_or("not set", |l| l.timezone.as_str())
+            );
+            config
+        }
+        Err(ConfigError::NotConfigured) => {
+            info!("no configuration written yet, information screens disabled");
+            Config::default()
+        }
+        Err(err) => {
+            warn!("invalid configuration: {}", err);
+            Config::default()
+        }
+    }
 }
 
 /// Offset and size of the partition labelled `label`, from the table in flash.

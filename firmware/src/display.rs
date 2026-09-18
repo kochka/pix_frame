@@ -4,6 +4,8 @@
 //! to a host-testable crate. Everything that describes the physical frame
 //! (dimensions, wiring pattern) is declared in `main.rs`, not here.
 
+use smart_leds::RGB8;
+
 /// How consecutive rows are chained on the physical LED strip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wiring {
@@ -45,5 +47,38 @@ impl MatrixLayout {
         };
 
         Some(y * self.width + column)
+    }
+}
+
+/// Logical drawing surface over the physical pixel buffer.
+pub struct Canvas<'a> {
+    pixels: &'a mut [RGB8],
+    layout: &'a MatrixLayout,
+}
+
+impl<'a> Canvas<'a> {
+    pub fn new(pixels: &'a mut [RGB8], layout: &'a MatrixLayout) -> Self {
+        Self { pixels, layout }
+    }
+
+    pub const fn width(&self) -> usize {
+        self.layout.width
+    }
+
+    pub const fn height(&self) -> usize {
+        self.layout.height
+    }
+
+    pub fn clear(&mut self) {
+        self.pixels.fill(RGB8::new(0, 0, 0));
+    }
+
+    /// Sets the logical pixel `(x, y)`; out-of-range coordinates are ignored.
+    pub fn set(&mut self, x: usize, y: usize, color: RGB8) {
+        if let Some(index) = self.layout.physical_index(x, y)
+            && let Some(pixel) = self.pixels.get_mut(index)
+        {
+            *pixel = color;
+        }
     }
 }

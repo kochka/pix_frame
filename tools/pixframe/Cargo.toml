@@ -1,0 +1,13 @@
+[package]
+name = "pixframe"
+description = "Desktop tool for managing a pix-frame device: builds and inspects the device configuration image"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+esp-nvs = "0.5.0"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.9.12"

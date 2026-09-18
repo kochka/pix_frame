@@ -8,15 +8,19 @@ run = "cargo fmt --all -- --check"
 
 [tasks.test]
 description = "Run host-side tests"
-run = "cargo test -p pxa-core -p pxa"
+run = "cargo test -p pxa-core -p pxa -p pixframe"
 
 [tasks.lint]
 description = "Lint host-side workspace packages"
-run = "cargo clippy -p pxa-core -p pxa --all-targets -- -D warnings"
+run = "cargo clippy -p pxa-core -p pxa -p pixframe --all-targets -- -D warnings"
 
 [tasks.build-pxa]
 description = "Build the desktop PXA CLI"
 run = "cargo build -p pxa --release"
+
+[tasks.build-pixframe]
+description = "Build the desktop device-management tool"
+run = "cargo build -p pixframe --release"
 
 [tasks.build-firmware]
 description = "Build the ESP32-C6 firmware"
@@ -39,9 +43,17 @@ espflash erase-region --chip esp32c6 0x410000 0x3F0000
 espflash write-bin --chip esp32c6 0x410000 target/animations.bin
 """
 
+[tasks.flash-config]
+description = "Build config.toml into an NVS image and write it to the `nvs` partition (offset from partitions.csv)"
+depends = ["build-pixframe"]
+run = """
+target/release/pixframe config build config.toml -o target/nvs.bin
+espflash write-bin --chip esp32c6 0x9000 target/nvs.bin
+"""
+
 [tasks.check]
-description = "Run host-side formatting, tests, linting, and CLI build"
-depends = ["fmt-check", "test", "lint", "build-pxa"]
+description = "Run host-side formatting, tests, linting, and tool builds"
+depends = ["fmt-check", "test", "lint", "build-pxa", "build-pixframe"]
 
 [tasks.clean]
 description = "Remove all build artifacts (host and firmware)"

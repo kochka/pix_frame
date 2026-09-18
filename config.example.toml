@@ -1,0 +1,22 @@
+# pix-frame device configuration.
+#
+# Copy this file to `config.toml` (ignored by git, it holds your Wi-Fi
+# password), edit it, then write it to the frame with `mise run flash-config`.
+# Every section except [display] is optional: screens that need a missing
+# section are simply never shown.
+
+[display]
+# Show an information screen (clock, weather...) after this many animations.
+# 0 disables information screens.
+info_every = 5
+
+[wifi]
+ssid = "MyNetwork"
+password = "secret"
+
+[location]
+# Used for the weather and to derive the local time zone offset.
+latitude = 48.8566
+longitude = 2.3522
+# IANA time zone name.
+timezone = "Europe/Paris"
