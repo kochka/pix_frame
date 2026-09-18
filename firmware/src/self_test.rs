@@ -6,7 +6,7 @@ use smart_leds::{RGB8, SmartLedsWrite};
 use crate::color::random_vivid;
 use crate::display::{Canvas, MatrixLayout};
 use crate::font::{GLYPH_HEIGHT, draw_text_centered};
-use crate::screens::render_clock;
+use crate::screens::{WifiStatus, render_clock, render_wifi};
 
 const TEST_BRIGHTNESS: u8 = 60;
 const BLACK: RGB8 = RGB8::new(0, 0, 0);
@@ -20,6 +20,7 @@ pub fn run<L, const N: usize>(
     layout: &MatrixLayout,
     pixels: &mut [RGB8; N],
     delay: &Delay,
+    wifi: WifiStatus,
 ) where
     L: SmartLedsWrite<Color = RGB8>,
     L::Error: Debug,
@@ -30,6 +31,7 @@ pub fn run<L, const N: usize>(
     test_random_blink(led, pixels, delay);
     test_random_fill(led, pixels, delay);
     test_text(led, layout, pixels, delay);
+    test_wifi(led, layout, pixels, delay, wifi);
 }
 
 fn random_color() -> RGB8 {
@@ -174,6 +176,25 @@ where
     show(led, pixels);
     delay.delay_millis(1500);
 
+    clear(pixels);
+    show(led, pixels);
+}
+
+/// Shows the Wi-Fi connection status.
+fn test_wifi<L>(
+    led: &mut L,
+    layout: &MatrixLayout,
+    pixels: &mut [RGB8],
+    delay: &Delay,
+    wifi: WifiStatus,
+) where
+    L: SmartLedsWrite<Color = RGB8>,
+    L::Error: Debug,
+{
+    let mut canvas = Canvas::new(pixels, layout);
+    render_wifi(&mut canvas, wifi);
+    show(led, pixels);
+    delay.delay_millis(2000);
     clear(pixels);
     show(led, pixels);
 }

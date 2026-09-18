@@ -7,10 +7,55 @@ use smart_leds::RGB8;
 
 use crate::clock::Clock;
 use crate::display::Canvas;
-use crate::font::{BIG_DIGIT_HEIGHT, BIG_PAIR_WIDTH, draw_big_pair};
+use crate::font::{
+    BIG_DIGIT_HEIGHT, BIG_PAIR_WIDTH, GLYPH_HEIGHT, draw_big_pair, draw_text_centered,
+};
 
 const HOUR_COLOR: RGB8 = RGB8::new(255, 200, 60);
 const MINUTE_COLOR: RGB8 = RGB8::new(90, 170, 255);
+const LABEL_COLOR: RGB8 = RGB8::new(200, 200, 200);
+const OK_COLOR: RGB8 = RGB8::new(0, 200, 40);
+const KO_COLOR: RGB8 = RGB8::new(220, 20, 20);
+const PENDING_COLOR: RGB8 = RGB8::new(230, 200, 0);
+const OFF_COLOR: RGB8 = RGB8::new(90, 90, 90);
+
+/// Wi-Fi connection state, as published by the network tasks.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
+pub enum WifiStatus {
+    /// No `[wifi]` section in the configuration.
+    Off = 0,
+    Connecting = 1,
+    Connected = 2,
+    /// The last connection attempt failed; retries continue.
+    Failed = 3,
+}
+
+impl WifiStatus {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Connecting,
+            2 => Self::Connected,
+            3 => Self::Failed,
+            _ => Self::Off,
+        }
+    }
+}
+
+/// "WIFI" above the status: OK in green, KO in red, OFF when unconfigured.
+pub fn render_wifi(canvas: &mut Canvas<'_>, status: WifiStatus) {
+    canvas.clear();
+    let (text, color) = match status {
+        WifiStatus::Off => ("OFF", OFF_COLOR),
+        WifiStatus::Connecting => ("...", PENDING_COLOR),
+        WifiStatus::Connected => ("OK", OK_COLOR),
+        WifiStatus::Failed => ("KO", KO_COLOR),
+    };
+    let gap = 3;
+    let top = canvas.height().saturating_sub(GLYPH_HEIGHT * 2 + gap) / 2;
+    draw_text_centered(canvas, top, "WIFI", LABEL_COLOR);
+    draw_text_centered(canvas, top + GLYPH_HEIGHT + gap, text, color);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
 pub enum Screen {

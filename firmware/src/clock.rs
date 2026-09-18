@@ -1,16 +1,21 @@
 //! Wall-clock time kept by the RTC timer.
 //!
 //! The RTC counts from an arbitrary origin until [`Clock::set_unix_time`] is
-//! called (by a future SNTP sync); until then [`Clock::local_time`] returns
-//! `None` and screens that need the time stay unavailable.
+//! called by the SNTP task; until then [`Clock::local_time`] returns `None`
+//! and screens that need the time stay unavailable. The handle is `Copy` so
+//! the playback loop and the network tasks can share it; the sync state and
+//! the UTC offset live in atomics.
+
+use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use esp_hal::rtc_cntl::Rtc;
 
+static SYNCED: AtomicBool = AtomicBool::new(false);
+static UTC_OFFSET: AtomicI32 = AtomicI32::new(0);
+
+#[derive(Clone, Copy)]
 pub struct Clock {
-    rtc: Rtc<'static>,
-    synced: bool,
-    /// Local time minus UTC, in seconds.
-    utc_offset: i32,
+    rtc: &'static Rtc<'static>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,37 +26,36 @@ pub struct LocalTime {
 }
 
 impl Clock {
-    pub fn new(rtc: Rtc<'static>) -> Self {
-        Self {
-            rtc,
-            synced: false,
-            utc_offset: 0,
-        }
+    pub fn new(rtc: &'static Rtc<'static>) -> Self {
+        Self { rtc }
     }
 
     /// Sets the current UTC time as seconds since 1970-01-01.
-    pub fn set_unix_time(&mut self, seconds: u64) {
+    pub fn set_unix_time(&self, seconds: u64) {
         self.rtc
             .set_current_time_us(seconds.saturating_mul(1_000_000));
-        self.synced = true;
+        SYNCED.store(true, Ordering::Release);
     }
 
     /// Sets the offset between local time and UTC, in seconds.
-    pub fn set_utc_offset(&mut self, seconds: i32) {
-        self.utc_offset = seconds;
+    pub fn set_utc_offset(&self, seconds: i32) {
+        UTC_OFFSET.store(seconds, Ordering::Relaxed);
     }
 
     pub fn is_synced(&self) -> bool {
-        self.synced
+        SYNCED.load(Ordering::Acquire)
+    }
+
+    /// Seconds since 1970-01-01 UTC, or `None` before the first sync.
+    pub fn unix_time(&self) -> Option<u64> {
+        self.is_synced()
+            .then(|| self.rtc.current_time_us() / 1_000_000)
     }
 
     /// Local time of day, or `None` before the first sync.
     pub fn local_time(&self) -> Option<LocalTime> {
-        if !self.synced {
-            return None;
-        }
-        let unix = self.rtc.current_time_us() / 1_000_000;
-        Some(time_of_day(unix, self.utc_offset))
+        let unix = self.unix_time()?;
+        Some(time_of_day(unix, UTC_OFFSET.load(Ordering::Relaxed)))
     }
 }
 

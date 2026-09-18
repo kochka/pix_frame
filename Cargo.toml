@@ -28,3 +28,10 @@ codegen-units = 1     # LLVM can perform better optimizations using a single thr
 debug = 2             # prefer slower builds but better debugging experience
 lto = "fat"
 opt-level = "s"
+
+# The radio blobs require optimization level 2 or 3 to work reliably.
+[profile.dev.package.esp-radio]
+opt-level = 3
+
+[profile.release.package.esp-radio]
+opt-level = 3

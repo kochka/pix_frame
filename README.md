@@ -25,7 +25,7 @@ GIF / APNG / WebP / PNG
 
 The current frame is:
 
-- an ESP32-C6-WROOM-1-N8 module (8 MB flash);
+- an ESP32-C6-WROOM-1-N8 module (8 MB flash, Wi-Fi);
 - a 16×16 WS2815 12 V LED matrix, wired as a single serpentine chain;
 - a 74AHCT125 level shifter for the LED data line on GPIO18;
 - a MINI560 buck converter supplying 5 V to the ESP32 side.
@@ -153,11 +153,19 @@ schedule is not rebased.
 Pressing the BOOT button of the dev board (GPIO9) runs the LED self-test once,
 after which playback resumes with the next animation.
 
+With a `[wifi]` section in the configuration, the firmware joins the network
+at boot and keeps reconnecting after drops. The first result is flashed on the
+matrix for a moment ("WIFI" then "OK" in green or "KO" in red), and the
+self-test ends with the same screen. Once connected, the clock is set from
+`pool.ntp.org` and refreshed every hour; the local offset comes from the
+configured time zone (European Union daylight-saving rules and UTC are
+supported, other zones show UTC until the weather service provides the
+offset). Without Wi-Fi the frame only plays animations.
+
 When `info_every` is set, an information screen is shown for 5 seconds after
 that many animations. Each screen has an availability condition, so it is
-skipped until its data exists: the clock needs the time to have been set by a
-network sync, which is not implemented yet. Hours are drawn above minutes in
-large digits.
+skipped until its data exists: the clock waits for the first time sync. Hours
+are drawn above minutes in large digits.
 
 Files whose dimensions differ from the matrix, or that fail validation, are
 logged and skipped. Without any playable animation the LED self-test runs
@@ -300,12 +308,12 @@ Done:
 - firmware PXA player streaming from a dedicated flash partition, random
   playlist with a minimum play time;
 - firmware LED self-test with a configurable matrix layout;
-- device configuration in NVS with the `pixframe` tool, information-screen
-  scheduling and the clock screen rendering.
+- device configuration in NVS with the `pixframe` tool;
+- Wi-Fi station, SNTP time synchronisation and the clock screen shown every
+  N animations.
 
 Not yet:
 
-- Wi-Fi and time synchronisation (the clock screen stays hidden until then);
 - weather and temperature screens;
 
 - `pxa preview`;

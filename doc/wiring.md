@@ -163,7 +163,14 @@ For a bare module, wire a push button between the chosen GPIO and GND and
 change the pin in `firmware/src/main.rs`; the internal pull-up makes an
 external resistor unnecessary.
 
-## 7. To Confirm on the Physical Frame
+## 7. Wi-Fi
+
+The module's on-board antenna is used; nothing to wire. Expect peaks of a few
+hundred milliamperes on the 3.3 V rail while the radio transmits, on top of
+the LED supply. The first connection result is flashed on the matrix after
+boot and at the end of the self-test.
+
+## 8. To Confirm on the Physical Frame
 
 - [ ] How the ESP32-C6 module gets 3.3 V (dev board regulator or external LDO).
 - [ ] Series resistor on the data line and its value.

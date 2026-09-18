@@ -8,29 +8,36 @@
 #![deny(clippy::large_stack_frames)]
 
 use defmt::{error, info, warn};
+use embassy_executor::{SpawnError, SpawnToken, Spawner};
+use embassy_net::StackResources;
+use embassy_time::{Duration, Instant, Timer};
 use esp_bootloader_esp_idf::partitions::{self, PARTITION_TABLE_MAX_LEN};
 use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{Input, InputConfig, Pull};
-use esp_hal::main;
 use esp_hal::rmt::Rmt;
 use esp_hal::rng::Rng;
 use esp_hal::rtc_cntl::Rtc;
-use esp_hal::time::{Duration, Instant, Rate};
+use esp_hal::time::Rate;
+use esp_hal::timer::timg::TimerGroup;
 use esp_hal_smartled::{RmtSmartLeds, buffer_size, color_order};
 use esp_println as _;
+use esp_radio::wifi::sta::StationConfig;
+use esp_radio::wifi::{AuthenticationMethodConfig, ControllerConfig, Interface, WifiController};
 use esp_storage::FlashStorage;
 use pix_frame_firmware::catalog::{Catalog, Entry, ScanEnd};
 use pix_frame_firmware::clock::Clock;
-use pix_frame_firmware::config::{Config, ConfigError};
+use pix_frame_firmware::config::{Config, ConfigError, Wifi};
 use pix_frame_firmware::display::{Canvas, MatrixLayout, Wiring};
+use pix_frame_firmware::net;
 use pix_frame_firmware::player::{PlayError, Player};
 use pix_frame_firmware::playlist::Playlist;
 use pix_frame_firmware::screens;
 use pix_frame_firmware::self_test;
 use pix_frame_firmware::storage::{ByteSource, FlashPartition, NvsFlash};
 use smart_leds::{RGB8, SmartLedsWrite, brightness};
+use static_cell::{ConstStaticCell, StaticCell};
 
 // Physical description of the attached frame. This is the only place in the
 // firmware that knows the matrix dimensions, wiring and channel order.
@@ -56,7 +63,12 @@ const ERROR_BACKOFF: Duration = Duration::from_millis(500);
 /// How long an information screen stays on before animations resume.
 const INFO_SCREEN_TIME: Duration = Duration::from_millis(5_000);
 
-/// Heap used by the NVS reader (and by the network stack later).
+/// How long the Wi-Fi result is shown after boot.
+const WIFI_STATUS_TIME: Duration = Duration::from_millis(1_500);
+
+/// Heap regions: the radio driver wants the reclaimed RAM, the rest serves
+/// the NVS reader and the network stack.
+const RECLAIMED_HEAP_SIZE: usize = 64 * 1024;
 const HEAP_SIZE: usize = 64 * 1024;
 
 /// Labels in `partitions.csv`.
@@ -65,6 +77,10 @@ const CONFIG_PARTITION: &str = "nvs";
 
 type LedDriver<'d> =
     RmtSmartLeds<'d, { buffer_size::<RGB8>(LED_COUNT) }, Blocking, RGB8, color_order::Grb>;
+
+static RTC: StaticCell<Rtc<'static>> = StaticCell::new();
+static NET_RESOURCES: ConstStaticCell<StackResources<4>> =
+    ConstStaticCell::new(StackResources::new());
 
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
@@ -80,11 +96,16 @@ esp_bootloader_esp_idf::esp_app_desc!();
     clippy::large_stack_frames,
     reason = "it's not unusual to allocate larger buffers etc. in main"
 )]
-#[main]
-fn main() -> ! {
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -> ! {
     let hal_config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(hal_config);
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: RECLAIMED_HEAP_SIZE);
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+
+    // The scheduler must run before the radio is initialised.
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // The WS2815 frame is wired to GPIO18; the RMT peripheral generates the
     // precisely timed signal the LEDs expect.
@@ -119,8 +140,23 @@ fn main() -> ! {
             Config::default()
         }
     };
-    let clock = Clock::new(Rtc::new(peripherals.RTC_TIMER));
+    let clock = Clock::new(RTC.init(Rtc::new(peripherals.RTC_TIMER)));
     let mut info_screens = screens::Rotation::default();
+    let rng = Rng::new();
+
+    if let Some(wifi) = &config.wifi {
+        let timezone = config.location.as_ref().map(|l| l.timezone.clone());
+        match start_network(peripherals.WIFI, wifi, &rng) {
+            Ok((stack, runner, controller)) => {
+                spawn(&spawner, net::net_task(runner), "net");
+                spawn(&spawner, net::wifi_task(controller), "wifi");
+                spawn(&spawner, net::time_task(stack, clock, timezone), "time");
+            }
+            Err(err) => error!("wifi setup failed: {:?}", err),
+        }
+    } else {
+        info!("no wifi configured, clock and network features disabled");
+    }
 
     let (offset, len) = match find_partition(&mut flash, &mut table_bytes, ANIMATIONS_PARTITION) {
         Some(window) => window,
@@ -156,12 +192,18 @@ fn main() -> ! {
         warn!("bundle indexing stopped early: {}", end);
     }
 
-    let rng = Rng::new();
     let mut random = || rng.random();
     let mut playlist = Playlist::new(catalog.len(), &mut random);
     let mut since_info: u8 = 0;
 
     loop {
+        if let Some(status) = net::take_announcement() {
+            let mut canvas = Canvas::new(&mut pixels, &LAYOUT);
+            screens::render_wifi(&mut canvas, status);
+            show(&mut led, &pixels);
+            Timer::after(WIFI_STATUS_TIME).await;
+        }
+
         if config.info_every > 0 && since_info >= config.info_every {
             since_info = 0;
             match info_screens.pick(&clock) {
@@ -170,7 +212,7 @@ fn main() -> ! {
                     let mut canvas = Canvas::new(&mut pixels, &LAYOUT);
                     if screens::render(screen, &mut canvas, &clock) {
                         show(&mut led, &pixels);
-                        delay.delay(INFO_SCREEN_TIME);
+                        Timer::after(INFO_SCREEN_TIME).await;
                     }
                 }
                 None => info!("no information screen available yet"),
@@ -190,54 +232,81 @@ fn main() -> ! {
             header.frame_count(),
             header.palette_size()
         );
-        match play(
-            &mut led,
-            &mut source,
-            entry,
-            &mut pixels,
-            &delay,
-            &mut button,
-        ) {
-            Ok(PlayEnd::Finished) => {}
+        match play(&mut led, &mut source, entry, &mut pixels, &mut button).await {
+            Ok(PlayEnd::Finished) => since_info = since_info.saturating_add(1),
             Ok(PlayEnd::Interrupted) => {
                 info!("self-test button pressed");
-                self_test::run(&mut led, &LAYOUT, &mut pixels, &delay);
+                self_test::run(&mut led, &LAYOUT, &mut pixels, &delay, net::wifi_status());
             }
             Err(err) => {
                 warn!("animation at {=u32:#x}: {}", entry.offset, err);
-                delay.delay(ERROR_BACKOFF);
+                Timer::after(ERROR_BACKOFF).await;
             }
         }
     }
 }
 
-/// Active-low push button that reports each press once.
-struct Button {
-    input: Input<'static>,
-    held: bool,
-}
-
-impl Button {
-    fn new(input: Input<'static>) -> Self {
-        Self { input, held: false }
-    }
-
-    /// True on the first poll after the button went down; false until it is
-    /// released and pressed again.
-    fn take_press(&mut self) -> bool {
-        let down = self.input.is_low();
-        let pressed = down && !self.held;
-        self.held = down;
-        pressed
+/// Spawns a task; the token only fails when the task is already running.
+fn spawn(spawner: &Spawner, token: Result<SpawnToken<impl Sized>, SpawnError>, name: &str) {
+    match token {
+        Ok(token) => spawner.spawn(token),
+        Err(err) => error!("cannot spawn the {} task: {:?}", name, err),
     }
 }
 
-/// Why [`play`] returned.
-enum PlayEnd {
-    /// The minimum play time was reached at a loop boundary.
-    Finished,
-    /// The self-test button was pressed.
-    Interrupted,
+/// Configures the station and builds the network stack; the tasks driving
+/// them are spawned by the caller.
+#[allow(
+    clippy::large_stack_frames,
+    reason = "the radio configuration structs are large by design; called once from main at boot"
+)]
+fn start_network(
+    wifi: esp_hal::peripherals::WIFI<'static>,
+    credentials: &Wifi,
+    rng: &Rng,
+) -> Result<
+    (
+        embassy_net::Stack<'static>,
+        embassy_net::Runner<'static, Interface>,
+        WifiController<'static>,
+    ),
+    esp_radio::wifi::WifiError,
+> {
+    let ssid = credentials
+        .ssid
+        .as_str()
+        .try_into()
+        .map_err(|_| esp_radio::wifi::WifiError::InvalidArguments)?;
+    let authentication = if credentials.password.is_empty() {
+        AuthenticationMethodConfig::Open
+    } else {
+        let password = credentials
+            .password
+            .as_str()
+            .try_into()
+            .map_err(|_| esp_radio::wifi::WifiError::InvalidArguments)?;
+        AuthenticationMethodConfig::Wpa2Personal(password)
+    };
+    let station = StationConfig::default()
+        .with_ssid(ssid)
+        .with_authentication(authentication);
+    let controller_config =
+        ControllerConfig::default().with_initial_config(esp_radio::wifi::Config::Station(station));
+    let controller = WifiController::new(wifi, controller_config)?;
+    let interface = Interface::station();
+
+    let seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
+    let (stack, runner) = embassy_net::new(
+        interface,
+        embassy_net::Config::dhcpv4(Default::default()),
+        NET_RESOURCES.take(),
+        seed,
+    );
+    info!(
+        "wifi station configured for '{}'",
+        credentials.ssid.as_str()
+    );
+    Ok((stack, runner, controller))
 }
 
 /// Reads the device configuration from the NVS partition; any problem is
@@ -294,6 +363,35 @@ fn find_partition(
         .map(|entry| (entry.offset(), entry.len()))
 }
 
+/// Active-low push button that reports each press once.
+struct Button {
+    input: Input<'static>,
+    held: bool,
+}
+
+impl Button {
+    fn new(input: Input<'static>) -> Self {
+        Self { input, held: false }
+    }
+
+    /// True on the first poll after the button went down; false until it is
+    /// released and pressed again.
+    fn take_press(&mut self) -> bool {
+        let down = self.input.is_low();
+        let pressed = down && !self.held;
+        self.held = down;
+        pressed
+    }
+}
+
+/// Why [`play`] returned.
+enum PlayEnd {
+    /// The minimum play time was reached at a loop boundary.
+    Finished,
+    /// The self-test button was pressed.
+    Interrupted,
+}
+
 /// Plays one animation with deadline-based scheduling.
 ///
 /// Frame `i + 1` is decoded while frame `i` is displayed, then sent exactly
@@ -301,27 +399,26 @@ fn find_partition(
 /// first frame, so decoding and LED transmission time never add drift. A
 /// late frame is shown as soon as it is ready; the schedule is not rebased.
 /// The animation loops until [`MIN_PLAY_TIME`] is reached at a loop boundary
-/// and the last frame keeps its full duration before returning. The button is
-/// polled at every frame boundary.
+/// and the last frame keeps its full duration before returning. The button
+/// is polled at every frame boundary. Waiting yields to the other tasks.
 #[allow(
     clippy::large_stack_frames,
     reason = "the player state is bounded by the display size (palette plus one packed frame)"
 )]
-fn play<S: ByteSource>(
+async fn play<S: ByteSource>(
     led: &mut LedDriver<'_>,
     source: &mut S,
     entry: &Entry,
     pixels: &mut [RGB8; LED_COUNT],
-    delay: &Delay,
     button: &mut Button,
 ) -> Result<PlayEnd, PlayError> {
     let mut player = Player::<LED_COUNT>::open(source, entry, &LAYOUT)?;
     let mut deadline = Instant::now();
-    let mut scheduled = Duration::ZERO;
+    let mut scheduled = Duration::from_ticks(0);
 
     loop {
         let frame = player.next_frame(source, &LAYOUT, pixels)?;
-        wait_until(deadline, delay);
+        Timer::at(deadline).await;
         if button.take_press() {
             return Ok(PlayEnd::Interrupted);
         }
@@ -332,16 +429,9 @@ fn play<S: ByteSource>(
         scheduled += duration;
 
         if frame.is_last && scheduled >= MIN_PLAY_TIME {
-            wait_until(deadline, delay);
+            Timer::at(deadline).await;
             return Ok(PlayEnd::Finished);
         }
-    }
-}
-
-fn wait_until(deadline: Instant, delay: &Delay) {
-    let now = Instant::now();
-    if now < deadline {
-        delay.delay(deadline - now);
     }
 }
 
@@ -353,6 +443,6 @@ fn show(led: &mut LedDriver<'_>, pixels: &[RGB8]) {
 
 fn self_test_forever(led: &mut LedDriver<'_>, pixels: &mut [RGB8; LED_COUNT], delay: &Delay) -> ! {
     loop {
-        self_test::run(led, &LAYOUT, pixels, delay);
+        self_test::run(led, &LAYOUT, pixels, delay, net::wifi_status());
     }
 }
