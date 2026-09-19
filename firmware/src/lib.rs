@@ -8,6 +8,7 @@ pub mod color;
 pub mod config;
 pub mod display;
 pub mod font;
+pub mod leds;
 pub mod net;
 pub mod player;
 pub mod playlist;

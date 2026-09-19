@@ -27,7 +27,7 @@ The current frame is:
 
 - an ESP32-C6-WROOM-1-N8 module (8 MB flash, Wi-Fi);
 - a 16×16 WS2815 12 V LED matrix, wired as a single serpentine chain;
-- a 74AHCT125 level shifter for the LED data line on GPIO18;
+- a 74AHCT125 level shifter for the LED data line on GPIO18 (SPI with DMA);
 - a MINI560 buck converter supplying 5 V to the ESP32 side.
 
 The 16×16 size is a configuration, not a limit. Matrix dimensions and wiring

@@ -998,19 +998,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "esp-hal-smartled"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5315ad80e19e70920e282676e56fec5fb2115c36c9f9fbe14b154148ba761743"
-dependencies = [
- "document-features",
- "esp-hal",
- "num-traits",
- "smart-leds-trait",
- "thiserror",
-]
-
-[[package]]
 name = "esp-metadata-generated"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1923,7 +1910,6 @@ dependencies = [
  "esp-alloc",
  "esp-bootloader-esp-idf",
  "esp-hal",
- "esp-hal-smartled",
  "esp-nvs",
  "esp-println",
  "esp-radio",

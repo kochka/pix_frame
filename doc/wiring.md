@@ -65,8 +65,12 @@ ESP32-C6 GPIO18 ──► 74AHCT125 1A
                     74AHCT125 1OE ──► GND (output always enabled)
 ```
 
-- **GPIO18** is the data output used by the firmware. It is driven by the RMT
-  peripheral, channel 0, at an 80 MHz RMT clock.
+- **GPIO18** is the data output used by the firmware. It is the MOSI line of
+  SPI2, routed there through the GPIO matrix, and the frame is sent by DMA so
+  the bit timing does not depend on the CPU. The clock and chip-select lines
+  are not used. An earlier version used the RMT peripheral; it needed the CPU
+  to refill its 48-symbol memory during transmission, which the scheduler and
+  the Wi-Fi driver disturbed once the firmware went async.
 - The 74AHCT125 raises the 3.3 V signal to 5 V, which the 12 V WS2815 accepts at its
   data input.
 - A series resistor of a few hundred ohms next to the first LED reduces ringing and
@@ -81,13 +85,15 @@ ESP32-C6 GPIO18 ──► 74AHCT125 1A
 
 | Parameter | Value | Where |
 | --- | --- | --- |
-| Protocol timing | WS2812-compatible (`WS2812_TIMING`) | `firmware/src/main.rs` |
-| Reset pulse | 300 µs | `firmware/src/main.rs` |
-| Channel order on the wire | GRB | `firmware/src/main.rs` |
-| RMT clock | 80 MHz | `firmware/src/main.rs` |
+| SPI clock | 3.2 MHz, 4 SPI bits per LED bit (800 kbit/s) | `firmware/src/leds.rs` |
+| Bit `0` on the wire | `1000`: 312 ns high, 937 ns low | `firmware/src/leds.rs` |
+| Bit `1` on the wire | `1100`: 625 ns high, 625 ns low | `firmware/src/leds.rs` |
+| Reset pulse | 120 zero bytes, 300 µs low | `firmware/src/leds.rs` |
+| Channel order on the wire | GRB | `firmware/src/leds.rs` |
 
-WS2815 uses the same bit timing as WS2812B but requires a longer reset than the
-original 50 µs. 300 µs works on the current frame.
+These pulses sit inside the WS2812B/WS2815 windows (0: 220–380 ns high,
+1: 580–1000 ns high, 1.25 µs per bit). WS2815 requires a longer reset than the
+original 50 µs; 300 µs works on the current frame.
 
 ---
 
@@ -138,7 +144,7 @@ logical (x, y) → serpentine physical index      (section 4)
       ↓
 RGB → GRB byte order                            (section 3.1)
       ↓
-RMT on GPIO18 → 74AHCT125 → WS2815 DI           (section 3)
+SPI DMA on GPIO18 → 74AHCT125 → WS2815 DI       (section 3)
 ```
 
 Only the last three steps depend on this specific frame. Larger frames (32×32,
