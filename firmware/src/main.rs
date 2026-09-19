@@ -154,6 +154,13 @@ async fn main(spawner: Spawner) -> ! {
                 spawn(&spawner, net::net_task(runner), "net");
                 spawn(&spawner, net::wifi_task(controller), "wifi");
                 spawn(&spawner, net::time_task(stack, clock, timezone), "time");
+                if let Some(location) = config.location.clone() {
+                    spawn(
+                        &spawner,
+                        net::weather_task(stack, clock, location),
+                        "weather",
+                    );
+                }
             }
             Err(err) => error!("wifi setup failed: {:?}", err),
         }

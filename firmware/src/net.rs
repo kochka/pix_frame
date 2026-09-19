@@ -13,13 +13,18 @@ use embassy_time::{Duration, Timer};
 use esp_radio::wifi::{Interface, WifiController};
 
 use crate::clock::Clock;
+use crate::config::Location;
 use crate::screens::WifiStatus;
-use crate::{sntp, tz};
+use crate::{http, sntp, tz, weather};
 
 const NTP_SERVER: &str = "pool.ntp.org";
 const SYNC_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const SYNC_RETRY: Duration = Duration::from_secs(30);
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
+const WEATHER_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const WEATHER_RETRY: Duration = Duration::from_secs(60);
+/// Open-Meteo replies with the requested fields are well under this.
+const WEATHER_BUFFER: usize = 2048;
 
 const NO_ANNOUNCEMENT: u8 = u8::MAX;
 
@@ -108,4 +113,56 @@ pub async fn time_task(stack: Stack<'static>, clock: Clock, timezone: Option<Str
             }
         }
     }
+}
+
+/// Fetches the current weather every quarter hour once the network is up.
+/// The reply also carries the UTC offset of the configured zone, which
+/// replaces the built-in rules for zones `tz` does not know.
+#[embassy_executor::task]
+pub async fn weather_task(stack: Stack<'static>, clock: Clock, location: Location) -> ! {
+    let Some(path) = weather::request_path(&location) else {
+        warn!("weather request does not fit, weather screen disabled");
+        loop {
+            Timer::after(Duration::from_secs(3600)).await;
+        }
+    };
+    let mut buffer = alloc::vec![0u8; WEATHER_BUFFER];
+    loop {
+        stack.wait_config_up().await;
+        let fetched = http::get(stack, weather::HOST, path.as_str(), &mut buffer)
+            .await
+            .map_err(WeatherError::Http)
+            .and_then(|body| weather::parse(body).map_err(WeatherError::Parse));
+        match fetched {
+            Ok(observation) => {
+                clock.set_utc_offset(observation.utc_offset);
+                match clock.unix_time() {
+                    Some(now) => {
+                        weather::publish(observation, now);
+                        info!(
+                            "weather: {}.{}°C, {}",
+                            observation.temperature_dc / 10,
+                            observation.temperature_dc.unsigned_abs() % 10,
+                            observation.condition
+                        );
+                        Timer::after(WEATHER_INTERVAL).await;
+                    }
+                    None => {
+                        // Cannot age the observation without a clock; retry soon.
+                        Timer::after(WEATHER_RETRY).await;
+                    }
+                }
+            }
+            Err(err) => {
+                warn!("weather fetch failed: {}", err);
+                Timer::after(WEATHER_RETRY).await;
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, defmt::Format)]
+enum WeatherError {
+    Http(http::HttpError),
+    Parse(weather::ParseError),
 }

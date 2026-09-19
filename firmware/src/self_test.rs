@@ -6,7 +6,8 @@ use smart_leds::{RGB8, SmartLedsWrite};
 use crate::color::random_vivid;
 use crate::display::{Canvas, MatrixLayout};
 use crate::font::{GLYPH_HEIGHT, draw_text_centered};
-use crate::screens::{WifiStatus, render_clock, render_wifi};
+use crate::screens::{WifiStatus, render_clock, render_weather, render_wifi};
+use crate::weather::{Condition, Observation};
 
 const TEST_BRIGHTNESS: u8 = 60;
 const BLACK: RGB8 = RGB8::new(0, 0, 0);
@@ -171,13 +172,30 @@ where
     show(led, pixels);
     delay.delay_millis(1500);
 
+    clear(pixels);
+
     let mut canvas = Canvas::new(pixels, layout);
     render_clock(&mut canvas, 12, 34);
     show(led, pixels);
     delay.delay_millis(1500);
 
-    clear(pixels);
-    show(led, pixels);
+    // Every weather icon in turn, with temperatures spanning the color scale.
+    let temperatures_dc = [305, 215, 174, 5, -35, -120, 280];
+    for (condition, temperature_dc) in Condition::ALL.into_iter().zip(temperatures_dc) {
+        clear(pixels);
+
+        let mut canvas = Canvas::new(pixels, layout);
+        render_weather(
+            &mut canvas,
+            &Observation {
+                temperature_dc,
+                condition,
+                utc_offset: 0,
+            },
+        );
+        show(led, pixels);
+        delay.delay_millis(600);
+    }
 }
 
 /// Shows the Wi-Fi connection status.

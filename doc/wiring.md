@@ -174,7 +174,8 @@ external resistor unnecessary.
 The module's on-board antenna is used; nothing to wire. Expect peaks of a few
 hundred milliamperes on the 3.3 V rail while the radio transmits, on top of
 the LED supply. The first connection result is flashed on the matrix after
-boot and at the end of the self-test.
+boot and at the end of the self-test. Network traffic is limited to SNTP
+(UDP, hourly) and one small HTTP request to Open-Meteo every 15 minutes.
 
 ## 8. To Confirm on the Physical Frame
 

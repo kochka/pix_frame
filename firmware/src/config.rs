@@ -36,7 +36,7 @@ pub struct Wifi {
     pub password: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Location {
     /// Degrees × 1,000,000.
     pub latitude_e6: i32,

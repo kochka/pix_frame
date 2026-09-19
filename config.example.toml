@@ -15,7 +15,8 @@ ssid = "MyNetwork"
 password = "secret"
 
 [location]
-# Used for the weather and to derive the local time zone offset.
+# Enables the outdoor weather screen (Open-Meteo, needs [wifi]) and gives the
+# exact local time zone offset for the clock.
 latitude = 48.8566
 longitude = 2.3522
 # IANA time zone name.

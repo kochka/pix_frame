@@ -46,7 +46,6 @@ agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details.
 | `partitions.csv` | Flash partition table: firmware, reserved OTA space, `animations` data partition |
 | `doc/PXA_spec.md` | Authoritative specification of the PXA binary format |
 | `doc/wiring.md` | Electrical wiring and physical LED layout |
-| `AGENTS.md` | Development guidelines for humans and coding agents |
 
 ## The PXA format in short
 
@@ -151,20 +150,30 @@ accumulate as drift. A late frame is shown as soon as it is ready and the
 schedule is not rebased.
 
 Pressing the BOOT button of the dev board (GPIO9) runs the LED self-test once,
-after which playback resumes with the next animation.
+after which playback resumes with the next animation. The self-test ends with
+a preview of every screen: text, clock, the seven weather icons in quick
+succession, and the Wi-Fi status.
 
 With a `[wifi]` section in the configuration, the firmware joins the network
 at boot and keeps reconnecting after drops. The first result is flashed on the
 matrix for a moment ("WIFI" then "OK" in green or "KO" in red), and the
 self-test ends with the same screen. Once connected, the clock is set from
-`pool.ntp.org` and refreshed every hour; the local offset comes from the
-configured time zone (European Union daylight-saving rules and UTC are
-supported, other zones show UTC until the weather service provides the
-offset). Without Wi-Fi the frame only plays animations.
+`pool.ntp.org` and refreshed every hour. The local offset comes from the
+configured time zone: built-in rules cover the European Union and UTC, and
+the weather service supplies the exact offset for any zone once it has
+answered. Without Wi-Fi the frame only plays animations.
+
+With a `[location]` section, the current outdoor conditions are fetched from
+[Open-Meteo](https://open-meteo.com/) (free, no key, plain HTTP) every
+15 minutes. The weather screen shows an icon for the sky condition (clear,
+partly cloudy, cloudy, fog, rain, snow, thunderstorm) above the temperature
+in whole degrees, colored from blue to red. It is skipped when the last
+answer is older than an hour.
 
 When `info_every` is set, an information screen is shown for 5 seconds after
 that many animations. Each screen has an availability condition, so it is
-skipped until its data exists: the clock waits for the first time sync. Hours
+skipped until its data exists: the clock waits for the first time sync, the
+weather for the first Open-Meteo answer. Available screens alternate. Hours
 are drawn above minutes in large digits.
 
 Files whose dimensions differ from the matrix, or that fail validation, are
@@ -309,12 +318,12 @@ Done:
   playlist with a minimum play time;
 - firmware LED self-test with a configurable matrix layout;
 - device configuration in NVS with the `pixframe` tool;
-- Wi-Fi station, SNTP time synchronisation and the clock screen shown every
-  N animations.
+- Wi-Fi station, SNTP time synchronisation, clock and outdoor weather screens
+  shown every N animations.
 
 Not yet:
 
-- weather and temperature screens;
+- indoor temperature screen (needs a sensor);
 
 - `pxa preview`;
 - Aseprite and Divoom importers;
