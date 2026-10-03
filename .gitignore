@@ -24,3 +24,10 @@
 # Platform-specific files
 *.pdb
 **/.DS_Store
+
+# KiCad local state and backups
+**/*.kicad_prl
+**/*-backups/
+**/fp-info-cache
+**/~*.lck
+__pycache__/

@@ -27,12 +27,13 @@ The current frame is:
 
 - an ESP32-C6-WROOM-1-N8 module (8 MB flash, Wi-Fi);
 - a 16×16 WS2815 12 V LED matrix, wired as a single serpentine chain;
-- a 74AHCT125 level shifter for the LED data line on GPIO18 (SPI with DMA);
+- the LED data line on GPIO18 (SPI with DMA), driven directly at 3.3 V;
 - a MINI560 buck converter supplying 5 V to the ESP32 side.
 
 The 16×16 size is a configuration, not a limit. Matrix dimensions and wiring
 are declared in one place in the firmware and the file format is dimension
-agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details.
+agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details and
+[`doc/pcb.md`](doc/pcb.md) for the carrier board that implements them.
 
 ## Repository layout
 
@@ -46,6 +47,8 @@ agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details.
 | `partitions.csv` | Flash partition table: firmware, reserved OTA space, `animations` data partition |
 | `doc/PXA_spec.md` | Authoritative specification of the PXA binary format |
 | `doc/wiring.md` | Electrical wiring and physical LED layout |
+| `doc/pcb.md` | Carrier board: design decisions, KiCad procedure, manufacturing |
+| `hardware` | KiCad 10 project for the carrier board |
 
 ## The PXA format in short
 

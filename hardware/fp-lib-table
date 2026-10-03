@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "pixframe")(type "KiCad")(uri "${KIPRJMOD}/pixframe.pretty")(options "")(descr "pix-frame project footprints"))
+)
