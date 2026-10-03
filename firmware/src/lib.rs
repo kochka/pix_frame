@@ -9,6 +9,7 @@ pub mod config;
 pub mod display;
 pub mod font;
 pub mod http;
+pub mod indoor;
 pub mod leds;
 pub mod net;
 pub mod player;

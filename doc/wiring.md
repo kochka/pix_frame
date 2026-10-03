@@ -23,15 +23,15 @@ design decisions and the KiCad procedure are in [`pcb.md`](pcb.md).
 | P-channel MOSFET | On/off switch | IRF4905 or similar, low Rds(on), see section 2.2 |
 | SPST switch | On/off control | Signal rated (0.5 A, 30 V), carries 0.1 mA |
 | GL5528 photoresistor | Ambient light | *Planned*; 5 mm CdS cell, see section 7 |
-| SHT31-D | Temperature, humidity | *Planned*; I²C sensor, see section 8 |
+| SHT31-D | Temperature, humidity | I²C sensor (any SHT3x), see section 8 |
 
 ### 1.1 GPIO map
 
 | GPIO | Function | Notes |
 | ---: | --- | --- |
 | 2 | Ambient light | ADC1 channel, *planned*, section 7 |
-| 6 | I2C SDA | SHT31, *planned*, section 8 |
-| 7 | I2C SCL | SHT31, *planned*, section 8 |
+| 6 | I2C SDA | SHT31, section 8 |
+| 7 | I2C SCL | SHT31, section 8 |
 | 9 | Self-test button | BOOT button, internal pull-up, section 6 |
 | 18 | LED data | SPI2 MOSI sent by DMA, section 3 |
 
@@ -287,7 +287,9 @@ dark room.
 
 ## 8. Temperature and Humidity Sensor
 
-*Planned, not fitted. No firmware support yet.*
+Read by the firmware once a minute for the indoor screen
+(`firmware/src/indoor.rs`). Any SHT3x (SHT30, SHT31, SHT35) works the same
+way. Without a sensor, or when it stops answering, the screen is skipped.
 
 ```text
 ESP32-C6 GPIO6 ───────────────────► SHT31 SDA
@@ -308,9 +310,9 @@ GND ─────────────────────────�
   effective value too far and keep the sensor from pulling the lines down.
 - A 100 nF capacitor across VDD and GND close to the sensor. Breakout boards
   normally have one already.
-- Run the bus at **100 kHz**. The sensor is read at most once a minute, and
+- The bus runs at **100 kHz**. The sensor is read once a minute, and
   slower edges survive a long cable far better than a fast bus would.
-- Use single-shot measurements with the internal heater off. Continuous
+- The firmware uses single-shot measurements with the internal heater off. Continuous
   high-repeatability sampling warms the die by a few tenths of a degree, which
   is exactly the error this screen is supposed to avoid.
 - **Placement decides the accuracy**, not the sensor. The frame itself is a heat

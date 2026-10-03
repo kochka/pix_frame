@@ -155,7 +155,7 @@ schedule is not rebased.
 Pressing the BOOT button of the dev board (GPIO9) runs the LED self-test once,
 after which playback resumes with the next animation. The self-test ends with
 a preview of every screen: text, clock, the seven weather icons in quick
-succession, and the Wi-Fi status.
+succession, the indoor screen, and the Wi-Fi status.
 
 With a `[wifi]` section in the configuration, the firmware joins the network
 at boot and keeps reconnecting after drops. The first result is flashed on the
@@ -173,11 +173,19 @@ partly cloudy, cloudy, fog, rain, snow, thunderstorm) above the temperature
 in whole degrees, colored from blue to red. It is skipped when the last
 answer is older than an hour.
 
+An SHT3x sensor on I2C (SDA on GPIO6, SCL on GPIO7, see `doc/wiring.md`
+section 8) is read every minute. The indoor screen shows a thermometer beside
+the temperature, to the tenth of a degree, above a drop beside the relative
+humidity. It needs neither Wi-Fi nor the clock, and is skipped when no
+reading succeeded in the last 5 minutes, so a frame without the sensor simply
+never shows it.
+
 When `info_every` is set, an information screen is shown for 5 seconds after
 that many animations. Each screen has an availability condition, so it is
 skipped until its data exists: the clock waits for the first time sync, the
-weather for the first Open-Meteo answer. Available screens alternate. Hours
-are drawn above minutes in large digits.
+weather for the first Open-Meteo answer, the indoor screen for the first
+sensor reading. Available screens alternate. Hours are drawn above minutes in
+large digits.
 
 Files whose dimensions differ from the matrix, or that fail validation, are
 logged and skipped. Without any playable animation the LED self-test runs
@@ -321,12 +329,10 @@ Done:
   playlist with a minimum play time;
 - firmware LED self-test with a configurable matrix layout;
 - device configuration in NVS with the `pixframe` tool;
-- Wi-Fi station, SNTP time synchronisation, clock and outdoor weather screens
-  shown every N animations.
+- Wi-Fi station, SNTP time synchronisation, clock, outdoor weather and indoor
+  temperature and humidity screens shown every N animations.
 
 Not yet:
-
-- indoor temperature screen (needs a sensor);
 
 - `pxa preview`;
 - Aseprite and Divoom importers;

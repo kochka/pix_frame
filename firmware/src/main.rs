@@ -15,8 +15,10 @@ use esp_bootloader_esp_idf::partitions::{self, PARTITION_TABLE_MAX_LEN};
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{Input, InputConfig, Pull};
+use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::rng::Rng;
 use esp_hal::rtc_cntl::Rtc;
+use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
 use esp_radio::wifi::sta::StationConfig;
@@ -26,6 +28,7 @@ use pix_frame_firmware::catalog::{Catalog, Entry, ScanEnd};
 use pix_frame_firmware::clock::Clock;
 use pix_frame_firmware::config::{Config, ConfigError, Wifi};
 use pix_frame_firmware::display::{Canvas, MatrixLayout, Wiring};
+use pix_frame_firmware::indoor;
 use pix_frame_firmware::leds::SpiLeds;
 use pix_frame_firmware::net;
 use pix_frame_firmware::player::{PlayError, Player};
@@ -132,6 +135,22 @@ async fn main(spawner: Spawner) -> ! {
         peripherals.GPIO9,
         InputConfig::default().with_pull(Pull::Up),
     ));
+
+    // SHT3x temperature and humidity sensor on I2C, SDA on GPIO6 and SCL on
+    // GPIO7, 100 kHz. See `doc/wiring.md` section 8.
+    match I2c::new(
+        peripherals.I2C0,
+        I2cConfig::default().with_frequency(Rate::from_khz(100)),
+    ) {
+        Ok(i2c) => {
+            let i2c = i2c
+                .with_sda(peripherals.GPIO6)
+                .with_scl(peripherals.GPIO7)
+                .into_async();
+            spawn(&spawner, indoor::indoor_task(i2c), "indoor");
+        }
+        Err(err) => error!("I2C setup failed: {:?}", err),
+    }
 
     let mut flash = FlashStorage::new(peripherals.FLASH);
     let mut table_bytes = [0u8; PARTITION_TABLE_MAX_LEN];
