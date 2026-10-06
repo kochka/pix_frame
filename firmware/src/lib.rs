@@ -11,6 +11,7 @@ pub mod font;
 pub mod http;
 pub mod indoor;
 pub mod leds;
+pub mod light;
 pub mod net;
 pub mod player;
 pub mod playlist;

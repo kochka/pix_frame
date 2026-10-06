@@ -21,6 +21,10 @@ const KEY_WIFI_PASSWORD: &str = "wifi_pass";
 const KEY_LATITUDE_E6: &str = "lat_e6";
 const KEY_LONGITUDE_E6: &str = "lon_e6";
 const KEY_TIMEZONE: &str = "timezone";
+const KEY_LIGHT_DARK_MV: &str = "light_dark_mv";
+const KEY_LIGHT_BRIGHT_MV: &str = "light_bright_mv";
+const KEY_LIGHT_MIN: &str = "light_min";
+const KEY_LIGHT_MAX: &str = "light_max";
 
 #[derive(Debug, Default)]
 pub struct Config {
@@ -28,6 +32,7 @@ pub struct Config {
     pub info_every: u8,
     pub wifi: Option<Wifi>,
     pub location: Option<Location>,
+    pub light: Option<Light>,
 }
 
 #[derive(Debug)]
@@ -43,6 +48,17 @@ pub struct Location {
     pub longitude_e6: i32,
     /// IANA time zone name.
     pub timezone: String,
+}
+
+/// Ambient light calibration: sensor voltages mapped to the brightness range.
+#[derive(Clone, Copy, Debug)]
+pub struct Light {
+    /// Reading at or below which the matrix runs at `min_brightness`.
+    pub dark_mv: u16,
+    /// Reading at or above which the matrix runs at `max_brightness`.
+    pub bright_mv: u16,
+    pub min_brightness: u8,
+    pub max_brightness: u8,
 }
 
 #[derive(Debug, defmt::Format)]
@@ -92,11 +108,21 @@ impl Config {
             }),
             None => None,
         };
+        let light = match optional::<P, u16>(nvs, &ns, KEY_LIGHT_DARK_MV)? {
+            Some(dark_mv) => Some(Light {
+                dark_mv,
+                bright_mv: optional(nvs, &ns, KEY_LIGHT_BRIGHT_MV)?.unwrap_or(u16::MAX),
+                min_brightness: optional(nvs, &ns, KEY_LIGHT_MIN)?.unwrap_or(0),
+                max_brightness: optional(nvs, &ns, KEY_LIGHT_MAX)?.unwrap_or(u8::MAX),
+            }),
+            None => None,
+        };
 
         Ok(Self {
             info_every,
             wifi,
             location,
+            light,
         })
     }
 }

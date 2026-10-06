@@ -180,6 +180,16 @@ humidity. It needs neither Wi-Fi nor the clock, and is skipped when no
 reading succeeded in the last 5 minutes, so a frame without the sensor simply
 never shows it.
 
+A GL5528 photoresistor on GPIO2 (see `doc/wiring.md` section 7) is sampled
+continuously and its voltage logged every 10 seconds. With a `[light]`
+section, the brightness follows the room: the voltage is mapped linearly from
+`dark_mv..bright_mv` onto `min_brightness..max_brightness`, and the matrix
+moves towards the new value one level every 25 ms instead of jumping. Read
+the two thresholds from the logs with the frame assembled in its place: one
+in the evening light where the frame should be at its dimmest, one in the
+light where it should be at its brightest. Without the section the brightness
+stays fixed.
+
 When `info_every` is set, an information screen is shown for 5 seconds after
 that many animations. Each screen has an availability condition, so it is
 skipped until its data exists: the clock waits for the first time sync, the
@@ -189,7 +199,7 @@ large digits.
 
 Files whose dimensions differ from the matrix, or that fail validation, are
 logged and skipped. Without any playable animation the LED self-test runs
-instead. Output brightness and the minimum play time are constants at the top
+instead. The fixed brightness and the minimum play time are constants at the top
 of `firmware/src/main.rs`.
 
 ## Using the `pxa` converter

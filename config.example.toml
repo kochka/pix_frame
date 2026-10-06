@@ -21,3 +21,16 @@ latitude = 48.8566
 longitude = 2.3522
 # IANA time zone name.
 timezone = "Europe/Paris"
+
+[light]
+# Ambient light calibration. The firmware logs the sensor voltage every
+# 10 seconds ("light: ... mV"): read it with the frame assembled in its place.
+# At or below dark_mv the matrix runs at min_brightness, at or above
+# bright_mv at max_brightness, linearly in between. Without this sectic'son the
+# brightness stays fixed.
+dark_mv = 400
+bright_mv = 2800
+# 0..=255. Keep max_brightness modest: 256 WS2815 at full white draw far more
+# than a small supply can deliver.
+min_brightness = 40
+max_brightness = 100

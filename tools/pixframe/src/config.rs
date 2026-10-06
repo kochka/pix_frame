@@ -25,6 +25,10 @@ pub const KEY_WIFI_PASSWORD: &str = "wifi_pass";
 pub const KEY_LATITUDE_E6: &str = "lat_e6";
 pub const KEY_LONGITUDE_E6: &str = "lon_e6";
 pub const KEY_TIMEZONE: &str = "timezone";
+pub const KEY_LIGHT_DARK_MV: &str = "light_dark_mv";
+pub const KEY_LIGHT_BRIGHT_MV: &str = "light_bright_mv";
+pub const KEY_LIGHT_MIN: &str = "light_min";
+pub const KEY_LIGHT_MAX: &str = "light_max";
 
 /// 802.11 limits.
 const MAX_SSID_BYTES: usize = 32;
@@ -39,6 +43,7 @@ pub struct Config {
     pub display: Display,
     pub wifi: Option<Wifi>,
     pub location: Option<Location>,
+    pub light: Option<Light>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -63,6 +68,19 @@ pub struct Location {
     pub longitude: f64,
     /// IANA time zone name, e.g. `Europe/Paris`.
     pub timezone: String,
+}
+
+/// Ambient light calibration, read from the firmware logs on the assembled
+/// frame: sensor voltages mapped linearly onto the brightness range.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Light {
+    /// Reading at or below which the matrix runs at `min_brightness`.
+    pub dark_mv: u16,
+    /// Reading at or above which the matrix runs at `max_brightness`.
+    pub bright_mv: u16,
+    pub min_brightness: u8,
+    pub max_brightness: u8,
 }
 
 impl Config {
@@ -90,6 +108,14 @@ impl Config {
             }
             if location.timezone.is_empty() || location.timezone.len() > MAX_TIMEZONE_BYTES {
                 bail!("location.timezone must be 1 to {MAX_TIMEZONE_BYTES} bytes");
+            }
+        }
+        if let Some(light) = &self.light {
+            if light.dark_mv >= light.bright_mv {
+                bail!("light.dark_mv must be below light.bright_mv");
+            }
+            if light.min_brightness > light.max_brightness {
+                bail!("light.min_brightness must not exceed light.max_brightness");
             }
         }
         Ok(())
@@ -132,6 +158,16 @@ impl Config {
             .map_err(|e| nvs_error(KEY_LONGITUDE_E6, e))?;
             set_str(&mut nvs, KEY_TIMEZONE, &location.timezone)?;
         }
+        if let Some(light) = &self.light {
+            nvs.set(&ns, &Key::from_str(KEY_LIGHT_DARK_MV), light.dark_mv)
+                .map_err(|e| nvs_error(KEY_LIGHT_DARK_MV, e))?;
+            nvs.set(&ns, &Key::from_str(KEY_LIGHT_BRIGHT_MV), light.bright_mv)
+                .map_err(|e| nvs_error(KEY_LIGHT_BRIGHT_MV, e))?;
+            nvs.set(&ns, &Key::from_str(KEY_LIGHT_MIN), light.min_brightness)
+                .map_err(|e| nvs_error(KEY_LIGHT_MIN, e))?;
+            nvs.set(&ns, &Key::from_str(KEY_LIGHT_MAX), light.max_brightness)
+                .map_err(|e| nvs_error(KEY_LIGHT_MAX, e))?;
+        }
         Ok(nvs.into_inner().into_inner())
     }
 
@@ -169,10 +205,20 @@ impl Config {
             }),
             None => None,
         };
+        let light = match optional::<u16>(&mut nvs, &ns, KEY_LIGHT_DARK_MV)? {
+            Some(dark_mv) => Some(Light {
+                dark_mv,
+                bright_mv: optional(&mut nvs, &ns, KEY_LIGHT_BRIGHT_MV)?.unwrap_or(u16::MAX),
+                min_brightness: optional(&mut nvs, &ns, KEY_LIGHT_MIN)?.unwrap_or(0),
+                max_brightness: optional(&mut nvs, &ns, KEY_LIGHT_MAX)?.unwrap_or(u8::MAX),
+            }),
+            None => None,
+        };
         Ok(Self {
             display: Display { info_every },
             wifi,
             location,
+            light,
         })
     }
 
@@ -203,6 +249,18 @@ impl Config {
             }
             None => {
                 let _ = writeln!(out, "location: not configured");
+            }
+        }
+        match &self.light {
+            Some(light) => {
+                let _ = writeln!(
+                    out,
+                    "light: {}..{} mV -> brightness {}..{}",
+                    light.dark_mv, light.bright_mv, light.min_brightness, light.max_brightness
+                );
+            }
+            None => {
+                let _ = writeln!(out, "light: not calibrated, fixed brightness");
             }
         }
         out
@@ -247,6 +305,11 @@ password = "hunter2!"
 latitude = 48.8566
 longitude = 2.3522
 timezone = "Europe/Paris"
+[light]
+dark_mv = 400
+bright_mv = 2500
+min_brightness = 8
+max_brightness = 60
 "#;
 
     #[test]
@@ -274,6 +337,18 @@ timezone = "Europe/Paris"
         );
         assert!(Config::parse("[display]\ninfo_every = 300").is_err());
         assert!(Config::parse("[unknown]\nx = 1").is_err());
+        assert!(
+            Config::parse(
+                "[light]\ndark_mv = 2500\nbright_mv = 400\nmin_brightness = 8\nmax_brightness = 60"
+            )
+            .is_err()
+        );
+        assert!(
+            Config::parse(
+                "[light]\ndark_mv = 400\nbright_mv = 2500\nmin_brightness = 60\nmax_brightness = 8"
+            )
+            .is_err()
+        );
     }
 
     #[test]

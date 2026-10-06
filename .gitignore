@@ -31,3 +31,4 @@
 **/fp-info-cache
 **/~*.lck
 __pycache__/
+**/.history

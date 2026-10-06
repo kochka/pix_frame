@@ -13,6 +13,9 @@ embassy-time = { version = "0.5.1", features = ["defmt"] }
 embedded-storage = "0.3.1"
 esp-alloc = { version = "0.11.0", features = ["esp32c6"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["defmt", "esp32c6"] }
+# When upgrading: once a release includes esp-rs/esp-hal#6412 (ADC readings
+# saturate while the radio runs on the ESP32-C6), remove `force_sar_power`
+# from src/light.rs.
 esp-hal = { version = "~1.2.0", features = ["defmt", "esp32c6", "unstable"] }
 esp-nvs = { version = "0.5.0", features = ["defmt"] }
 esp-radio = { version = "1.0.0-beta.1", features = ["defmt", "esp-alloc", "esp32c6", "unstable", "wifi"] }

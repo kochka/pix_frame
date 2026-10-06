@@ -22,14 +22,14 @@ design decisions and the KiCad procedure are in [`pcb.md`](pcb.md).
 | 12 V power supply | LED supply | Feeds the matrix and the MINI560 input |
 | P-channel MOSFET | On/off switch | IRF4905 or similar, low Rds(on), see section 2.2 |
 | SPST switch | On/off control | Signal rated (0.5 A, 30 V), carries 0.1 mA |
-| GL5528 photoresistor | Ambient light | *Planned*; 5 mm CdS cell, see section 7 |
+| GL5528 photoresistor | Ambient light | 5 mm CdS cell, see section 7 |
 | SHT31-D | Temperature, humidity | I²C sensor (any SHT3x), see section 8 |
 
 ### 1.1 GPIO map
 
 | GPIO | Function | Notes |
 | ---: | --- | --- |
-| 2 | Ambient light | ADC1 channel, *planned*, section 7 |
+| 2 | Ambient light | ADC1 channel, section 7 |
 | 6 | I2C SDA | SHT31, section 8 |
 | 7 | I2C SCL | SHT31, section 8 |
 | 9 | Self-test button | BOOT button, internal pull-up, section 6 |
@@ -241,8 +241,6 @@ external resistor unnecessary.
 
 ## 7. Ambient Light Sensor
 
-*Planned, not fitted. No firmware support yet.*
-
 The goal is to adapt the matrix brightness to the room: full brightness in
 daylight, dim at night, without the frame ever being the brightest thing in a
 dark room.
@@ -257,10 +255,22 @@ dark room.
 
 - The GL5528 is a photoresistor: roughly 10–20 kΩ at 10 lux and about 1 MΩ in
   the dark. It produces no voltage of its own, hence the divider. The node
-  voltage rises with light: about 0.03 V in the dark, 2 V under normal room
-  lighting, 3 V in daylight.
+  voltage rises with light. Typical values, which vary widely between cells:
+
+  | Light | Cell | GPIO2 |
+  | --- | ---: | ---: |
+  | Dark | ~1 MΩ | 0.03 V |
+  | 1 lux, night light | ~75 kΩ | 0.4 V |
+  | 10 lux, dim room | ~15 kΩ | 1.3 V |
+  | 100 lux, lit living room | ~3 kΩ | 2.5 V |
+  | 300 lux, bright room | ~1.4 kΩ | 2.9 V |
+  | 1000 lux, near a window | ~0.6 kΩ | 3.1 V |
+
 - The fixed 10 kΩ is not critical; 4.7 kΩ to 22 kΩ all work. Its value decides
-  which light level lands in the middle of the ADC range.
+  which light level lands in the middle of the ADC range: with 10 kΩ, around
+  10 lux. Resolution is best in dim light, where brightness has to be dosed
+  finely, and readings bunch up above 100 lux, where the matrix is at its
+  maximum anyway.
 - **GPIO2 belongs to ADC1.** On the ESP32-C6, ADC1 covers GPIO0 to GPIO6, and
   ADC2 cannot be used while the radio is on. The sensor must stay on ADC1.
 - An optional 100 nF from the ADC pin to GND filters noise picked up by the
@@ -278,7 +288,9 @@ dark room.
   cell becomes directional and measures one spot on a wall instead of the room.
 - Thresholds are per-frame. GL55xx units vary widely from one to the next, and
   so does the room, so the dark and bright reference readings belong in the
-  device configuration rather than in the firmware.
+  device configuration (`[light]` in `config.toml`) rather than in the
+  firmware. The firmware logs the sensor voltage every 10 seconds, calibrated
+  or not, so the readings are taken on the assembled frame in its place.
 - The GL5516 is an acceptable substitute with the same 10 kΩ resistor. Avoid the
   GL5539 and GL5549: far more resistive, they would need a 100 kΩ resistor and a
   high-impedance node that picks up noise.
@@ -342,5 +354,5 @@ boot and at the end of the self-test. Network traffic is limited to SNTP
 - [ ] Measured current at full white and at typical animation brightness.
 - [ ] Whether a single 12 V injection point is enough for 256 LEDs (voltage drop across the chain).
 - [ ] Inrush behaviour at switch-on once the bulk capacitor is fitted.
-- [ ] Ambient light readings in the dark and in full daylight, to set the calibration thresholds.
+- [ ] Ambient light readings at the dimmest and brightest wanted levels, to set `dark_mv` and `bright_mv`.
 - [ ] Offset between the SHT31 reading and the real room temperature once the frame is assembled.

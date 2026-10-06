@@ -30,6 +30,7 @@ use pix_frame_firmware::config::{Config, ConfigError, Wifi};
 use pix_frame_firmware::display::{Canvas, MatrixLayout, Wiring};
 use pix_frame_firmware::indoor;
 use pix_frame_firmware::leds::SpiLeds;
+use pix_frame_firmware::light;
 use pix_frame_firmware::net;
 use pix_frame_firmware::player::{PlayError, Player};
 use pix_frame_firmware::playlist::Playlist;
@@ -49,8 +50,9 @@ const LAYOUT: MatrixLayout = MatrixLayout {
 };
 const LED_COUNT: usize = LAYOUT.led_count();
 
-/// Global output brightness, 0..=255. Keep it modest: 256 WS2815 at full
-/// white draw far more than a small supply can deliver.
+/// Output brightness, 0..=255, used until the ambient light sensor is
+/// calibrated (`[light]` in the device configuration). Keep it modest: 256
+/// WS2815 at full white draw far more than a small supply can deliver.
 const BRIGHTNESS: u8 = 60;
 
 /// An animation loops until at least this much scheduled time has elapsed at
@@ -162,6 +164,11 @@ async fn main(spawner: Spawner) -> ! {
             Config::default()
         }
     };
+    // GL5528 photoresistor divider on GPIO2, which belongs to ADC1: ADC2 is
+    // unusable while the radio runs. See `doc/wiring.md` section 7.
+    let sensor = light::Sensor::new(peripherals.ADC1, peripherals.GPIO2);
+    spawn(&spawner, light::light_task(sensor, config.light), "light");
+
     let clock = Clock::new(RTC.init(Rtc::new(peripherals.RTC_TIMER)));
     let mut info_screens = screens::Rotation::default();
     let rng = Rng::new();
@@ -482,7 +489,10 @@ async fn wait_or_press(duration: Duration, button: &mut Button) -> bool {
 }
 
 fn show(led: &mut LedDriver, pixels: &[RGB8]) {
-    if let Err(err) = led.write(brightness(pixels.iter().copied(), BRIGHTNESS)) {
+    if let Err(err) = led.write(brightness(
+        pixels.iter().copied(),
+        light::brightness().unwrap_or(BRIGHTNESS),
+    )) {
         error!("LED write failed: {}", defmt::Debug2Format(&err));
     }
 }
