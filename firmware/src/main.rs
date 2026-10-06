@@ -21,7 +21,7 @@ use esp_hal::rtc_cntl::Rtc;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
-use esp_radio::wifi::sta::StationConfig;
+use esp_radio::wifi::sta::{ScanMethod, StationConfig};
 use esp_radio::wifi::{AuthenticationMethodConfig, ControllerConfig, Interface, WifiController};
 use esp_storage::FlashStorage;
 use pix_frame_firmware::catalog::{Catalog, Entry, ScanEnd};
@@ -328,9 +328,13 @@ fn start_network(
             .map_err(|_| esp_radio::wifi::WifiError::InvalidArguments)?;
         AuthenticationMethodConfig::Wpa2Personal(password)
     };
+    // The default fast scan joins the first access point found with the
+    // SSID; scanning all channels joins the strongest one, which matters on
+    // a mesh network.
     let station = StationConfig::default()
         .with_ssid(ssid)
-        .with_authentication(authentication);
+        .with_authentication(authentication)
+        .with_scan_method(ScanMethod::AllChannels);
     let controller_config =
         ControllerConfig::default().with_initial_config(esp_radio::wifi::Config::Station(station));
     let controller = WifiController::new(wifi, controller_config)?;

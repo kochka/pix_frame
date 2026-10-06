@@ -58,16 +58,21 @@ impl Sensor {
     }
 
     /// Mean of [`SAMPLES`] conversions, in millivolts. A conversion takes
-    /// about 50 µs, short enough to wait for without yielding.
+    /// about 50 µs, short enough to wait for without yielding, and to run in
+    /// a critical section so the radio cannot take the SAR power back midway.
     fn read_mv(&mut self) -> u16 {
         let mut sum = 0u32;
         for _ in 0..SAMPLES {
-            force_sar_power();
-            let mv = loop {
-                if let Ok(mv) = self.adc.read_oneshot(&mut self.pin) {
-                    break mv;
-                }
-            };
+            let mv = critical_section::with(|_| {
+                force_sar_power(true);
+                let mv = loop {
+                    if let Ok(mv) = self.adc.read_oneshot(&mut self.pin) {
+                        break mv;
+                    }
+                };
+                force_sar_power(false);
+                mv
+            });
             sum += u32::from(mv);
         }
         // The mean of u16 values fits in u16.
@@ -140,18 +145,20 @@ fn map(mv: u16, light: &Light) -> u8 {
     light.min_brightness + ((range * offset + span / 2) / span) as u8
 }
 
-/// Keeps the SAR ADC powered while the radio runs.
+/// Forces the SAR ADC on for a conversion, or hands it back to the radio.
 ///
 /// Radio initialisation hands SAR power to the PHY's power detector, which
 /// powers the SAR down between its own measurements: conversions then
-/// saturate at full scale whatever the input. Like ESP-IDF, this overrides it
-/// through `PWDET_CONF`, before every conversion since the radio rewrites the
-/// register. Workaround for esp-hal 1.2, whose ADC driver does not do it;
-/// remove once a release includes https://github.com/esp-rs/esp-hal/pull/6412.
+/// saturate at full scale whatever the input. Like ESP-IDF's oneshot driver,
+/// this forces the power on through `PWDET_CONF` around each conversion, then
+/// releases it: left forced, the power detector cannot run its own cycle and
+/// the transmit power control suffers (first connection attempts fail).
+/// Workaround for esp-hal 1.2, whose ADC driver does not do it; remove once a
+/// release includes https://github.com/esp-rs/esp-hal/pull/6412.
 ///
 /// See `sar_ctrl_ll_set_power_mode_from_pwdet` in ESP-IDF
 /// `components/hal/esp32c6/include/hal/sar_ctrl_ll.h`.
-fn force_sar_power() {
+fn force_sar_power(on: bool) {
     // The PAC does not describe the power detector.
     const PWDET_CONF: *mut u32 = 0x600A_0810 as *mut u32;
     const SAR_POWER_FORCE: u32 = 1 << 24;
@@ -169,7 +176,13 @@ fn force_sar_power() {
         // ESP32-C6, and only the two SAR power bits are changed.
         unsafe {
             let conf = PWDET_CONF.read_volatile();
-            PWDET_CONF.write_volatile(conf | SAR_POWER_FORCE | SAR_POWER_CNTL);
+            let conf = if on {
+                conf | SAR_POWER_FORCE | SAR_POWER_CNTL
+            } else {
+                // Power detector (FSM) control, the radio's default.
+                conf & !(SAR_POWER_FORCE | SAR_POWER_CNTL)
+            };
+            PWDET_CONF.write_volatile(conf);
         }
         clk_conf1.modify(|_, w| w.clk_fe_apb_en().bit(fe_apb_clock_enabled));
     });
