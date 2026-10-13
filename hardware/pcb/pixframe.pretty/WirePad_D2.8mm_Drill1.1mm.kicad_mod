@@ -1,0 +1,12 @@
+(footprint "WirePad_D2.8mm_Drill1.1mm"
+  (version 20240108)
+  (generator "konnect")
+  (layer "F.Cu")
+  (descr "Single wire solder pad; 2.8 mm copper, 1.1 mm plated drill. Pin 1 is the attached wire; no package-dependent pin map.")
+  (attr through_hole)
+  (pad "1" thru_hole circle (at 0 0) (size 2.8 2.8) (layers "*.Cu" "*.Mask") (drill 1.1) )
+  (fp_rect (start -1.6500 -1.6500) (end 1.6500 1.6500) (stroke (width 0.05) (type solid)) (fill none) (layer "F.CrtYd"))
+  (fp_poly (pts (xy -1.4000 -0.7000) (xy -0.7000 -1.4000) (xy 1.4000 -1.4000) (xy 1.4000 1.4000) (xy -1.4000 1.4000)) (stroke (width 0.1) (type solid)) (fill none) (layer "F.Fab"))
+  (fp_text reference "REF**" (at 0.0000 -2.6500 0) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
+  (fp_text value "WirePad_D2.8mm_Drill1.1mm" (at 0.0000 2.6500 0) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+)

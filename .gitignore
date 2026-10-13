@@ -32,3 +32,18 @@
 **/~*.lck
 __pycache__/
 **/.history
+
+# KiCad automatic saves and legacy/library backups
+/hardware/pcb/*.bak
+/hardware/pcb/*.kicad_sch~
+/hardware/pcb/*.kicad_pcb~
+/hardware/pcb/_autosave-*
+
+# Generated fabrication packages and local Fabrication Toolkit preferences
+/hardware/pcb/production/
+/hardware/pcb/fabrication-toolkit-options.json
+
+# Generated KiCad validation reports
+/hardware/pcb/*.drc.json
+/hardware/pcb/*.erc.json
+/hardware/pcb/*.rpt

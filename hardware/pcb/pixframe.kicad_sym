@@ -1,6 +1,6 @@
 (kicad_symbol_lib
 	(version 20251024)
-	(generator "pix-frame")
+	(generator "kicad_symbol_editor")
 	(generator_version "10.0")
 	(symbol "ESP32-C6-DEV-KIT_Waveshare"
 		(pin_names
@@ -9,6 +9,8 @@
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
+		(in_pos_files yes)
+		(duplicate_pin_numbers_are_jumpers no)
 		(property "Reference" "U"
 			(at -12.7 21.59 0)
 			(show_name no)
@@ -31,7 +33,7 @@
 				(justify left top)
 			)
 		)
-		(property "Footprint" "pixframe:ESP32-C6-DEV-KIT_Waveshare_2x16_P2.54mm"
+		(property "Footprint" "pixframe:ESP32-C6-DEV-KIT_Waveshare_Castellated"
 			(at 0 0 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -686,6 +688,8 @@
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
+		(in_pos_files yes)
+		(duplicate_pin_numbers_are_jumpers no)
 		(property "Reference" "U"
 			(at -7.62 6.35 0)
 			(show_name no)
@@ -708,8 +712,8 @@
 				(justify left top)
 			)
 		)
-		(property "Footprint" "pixframe:MINI560_Buck_29x18mm"
-			(at 0 0 0)
+		(property "Footprint" "pixframe:MINI560_Buck_22.5x17mm_CornerLands"
+			(at 0 10.414 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(hide yes)
@@ -731,7 +735,7 @@
 			)
 		)
 		(property "Description" "MINI560 synchronous step-down module, 4.5-20 V in, fixed output, 5 A"
-			(at 0 0 0)
+			(at 2.032 13.716 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(hide yes)

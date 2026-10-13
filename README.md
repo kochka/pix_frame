@@ -32,8 +32,8 @@ The current frame is:
 
 The 16×16 size is a configuration, not a limit. Matrix dimensions and wiring
 are declared in one place in the firmware and the file format is dimension
-agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details and
-[`doc/pcb.md`](doc/pcb.md) for the carrier board that implements them.
+agnostic. See the [hardware reference](doc/wiring.md) for the circuit,
+external wiring, carrier PCB and assembly instructions.
 
 ## Repository layout
 
@@ -46,8 +46,7 @@ agnostic. See [`doc/wiring.md`](doc/wiring.md) for the electrical details and
 | `config.example.toml` | Template for the device configuration |
 | `partitions.csv` | Flash partition table: firmware, reserved OTA space, `animations` data partition |
 | `doc/PXA_spec.md` | Authoritative specification of the PXA binary format |
-| `doc/wiring.md` | Electrical wiring and physical LED layout |
-| `doc/pcb.md` | Carrier board: design decisions, KiCad procedure, manufacturing |
+| `doc/wiring.md` | Hardware reference: circuit, wiring, PCB, assembly and commissioning |
 | `hardware` | KiCad 10 project for the carrier board |
 
 ## The PXA format in short
