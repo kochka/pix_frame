@@ -11,14 +11,15 @@ use smart_leds::RGB8;
 use crate::clock::Clock;
 use crate::display::Canvas;
 use crate::font::{
-    BIG_DIGIT_HEIGHT, BIG_PAIR_WIDTH, GLYPH_HEIGHT, draw_big_pair, draw_text, draw_text_centered,
-    text_width,
+    BIG_DIGIT_GAP, BIG_DIGIT_HEIGHT, BIG_DIGIT_WIDTH, BIG_PAIR_WIDTH, GLYPH_HEIGHT, draw_big_pair,
+    draw_text_centered,
 };
 use crate::indoor::{self, Reading};
 use crate::weather::{self, Condition, Observation};
 
 const HOUR_COLOR: RGB8 = RGB8::new(255, 200, 60);
 const MINUTE_COLOR: RGB8 = RGB8::new(90, 170, 255);
+const SEPARATOR_COLOR: RGB8 = RGB8::new(200, 200, 200);
 const LABEL_COLOR: RGB8 = RGB8::new(200, 200, 200);
 const OK_COLOR: RGB8 = RGB8::new(0, 200, 40);
 const KO_COLOR: RGB8 = RGB8::new(220, 20, 20);
@@ -67,10 +68,16 @@ pub fn render_wifi(canvas: &mut Canvas<'_>, status: WifiStatus) {
 pub enum Screen {
     Clock,
     Weather,
-    Indoor,
+    Temperature,
+    Humidity,
 }
 
-const ALL: [Screen; 3] = [Screen::Clock, Screen::Weather, Screen::Indoor];
+const ALL: [Screen; 4] = [
+    Screen::Clock,
+    Screen::Weather,
+    Screen::Temperature,
+    Screen::Humidity,
+];
 
 /// Round-robin over the screens that are currently available.
 #[derive(Default)]
@@ -96,7 +103,7 @@ fn available(screen: Screen, clock: &Clock) -> bool {
     match screen {
         Screen::Clock => clock.is_synced(),
         Screen::Weather => weather::current(clock.unix_time()).is_some(),
-        Screen::Indoor => indoor::current().is_some(),
+        Screen::Temperature | Screen::Humidity => indoor::current().is_some(),
     }
 }
 
@@ -107,7 +114,7 @@ pub fn render(screen: Screen, canvas: &mut Canvas<'_>, clock: &Clock) -> bool {
     match screen {
         Screen::Clock => match clock.local_time() {
             Some(time) => {
-                render_clock(canvas, time.hour, time.minute);
+                render_clock(canvas, time.hour, time.minute, time.second % 2 == 0);
                 true
             }
             None => false,
@@ -119,9 +126,16 @@ pub fn render(screen: Screen, canvas: &mut Canvas<'_>, clock: &Clock) -> bool {
             }
             None => false,
         },
-        Screen::Indoor => match indoor::current() {
+        Screen::Temperature => match indoor::current() {
             Some(reading) => {
-                render_indoor(canvas, &reading);
+                render_temperature(canvas, &reading);
+                true
+            }
+            None => false,
+        },
+        Screen::Humidity => match indoor::current() {
+            Some(reading) => {
+                render_humidity(canvas, &reading);
                 true
             }
             None => false,
@@ -258,56 +272,68 @@ fn temperature_color(celsius: i32) -> RGB8 {
 /// Condition icon on top, the temperature in whole degrees below.
 pub fn render_weather(canvas: &mut Canvas<'_>, observation: &Observation) {
     let (sprite, primary, secondary) = icon(observation.condition);
-    let gap = 1;
-    let block = ICON_SIZE + gap + GLYPH_HEIGHT;
-    let top = canvas.height().saturating_sub(block) / 2;
-    let left = canvas.width().saturating_sub(ICON_SIZE) / 2;
-    for (y, row) in sprite.iter().enumerate() {
-        for (x, cell) in row.iter().enumerate() {
-            let color = match cell {
-                1 => primary,
-                2 => secondary,
-                _ => continue,
-            };
-            canvas.set(left + x, top + y, color);
-        }
-    }
-
-    // Round tenths to the nearest degree, away from zero.
-    let tenths = observation.temperature_dc;
-    let celsius = (tenths + if tenths < 0 { -5 } else { 5 }) / 10;
+    let celsius = round_to_degree(observation.temperature_dc);
     let mut text: String<8> = String::new();
     // Cannot fail: at most "-999°" is 6 bytes.
     let _ = write!(text, "{celsius}°");
-    draw_text_centered(
+    draw_icon_over_text(
         canvas,
-        top + ICON_SIZE + gap,
+        &sprite,
+        (primary, secondary),
         &text,
         temperature_color(celsius),
     );
 }
 
+/// Rounds tenths of a degree to the nearest degree, away from zero.
+fn round_to_degree(tenths: i32) -> i32 {
+    (tenths + if tenths < 0 { -5 } else { 5 }) / 10
+}
+
+/// Draws a sprite above `text`, both horizontally centered, the block
+/// vertically centered.
+fn draw_icon_over_text<const W: usize>(
+    canvas: &mut Canvas<'_>,
+    sprite: &[[u8; W]],
+    colors: (RGB8, RGB8),
+    text: &str,
+    text_color: RGB8,
+) {
+    let gap = 1;
+    let block = sprite.len() + gap + GLYPH_HEIGHT;
+    let top = canvas.height().saturating_sub(block) / 2;
+    let left = canvas.width().saturating_sub(W) / 2;
+    draw_sprite(canvas, left, top, sprite, colors.0, colors.1);
+    draw_text_centered(canvas, top + sprite.len() + gap, text, text_color);
+}
+
 const GLASS: RGB8 = RGB8::new(150, 150, 160);
 const MERCURY: RGB8 = RGB8::new(230, 30, 20);
 const HUMIDITY_COLOR: RGB8 = RGB8::new(60, 160, 255);
+const DROP_HIGHLIGHT: RGB8 = RGB8::new(170, 220, 255);
 
 /// Thermometer, cells as in [`icon`]: 1 glass, 2 mercury.
-const THERMOMETER: [[u8; 3]; 7] = [
-    [0, 1, 0],
-    [1, 0, 1],
-    [1, 2, 1],
-    [1, 2, 1],
-    [2, 2, 2],
-    [2, 2, 2],
-    [0, 2, 0],
+const THERMOMETER: [[u8; 5]; ICON_SIZE] = [
+    [0, 0, 1, 0, 0],
+    [0, 1, 0, 1, 0],
+    [0, 1, 0, 1, 0],
+    [0, 1, 2, 1, 0],
+    [0, 1, 2, 1, 0],
+    [1, 2, 2, 2, 1],
+    [1, 2, 2, 2, 1],
+    [0, 1, 1, 1, 0],
 ];
 
-const DROP: [[u8; 5]; 5] = [
-    [0, 0, 1, 0, 0],
-    [0, 1, 1, 1, 0],
-    [1, 1, 1, 1, 1],
-    [1, 1, 1, 1, 1],
-    [0, 1, 1, 1, 0],
+/// Water drop, cells as in [`icon`]: 1 water, 2 highlight.
+const DROP: [[u8; 7]; ICON_SIZE] = [
+    [0, 0, 0, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 0, 0],
+    [0, 0, 1, 1, 1, 0, 0],
+    [0, 1, 1, 1, 1, 1, 0],
+    [1, 2, 1, 1, 1, 1, 1],
+    [1, 2, 1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 0, 0],
 ];
 
 fn draw_sprite<const W: usize>(
@@ -330,71 +356,55 @@ fn draw_sprite<const W: usize>(
     }
 }
 
-/// Draws an icon at the left edge and `text` against the right edge, the
-/// text vertically centered on the icon. The icon is left out when both do
-/// not fit side by side.
-fn draw_icon_line<const W: usize>(
-    canvas: &mut Canvas<'_>,
-    y: usize,
-    sprite: &[[u8; W]],
-    colors: (RGB8, RGB8),
-    text: &str,
-    text_color: RGB8,
-) {
-    let width = text_width(text);
-    if W + width <= canvas.width() {
-        draw_sprite(canvas, 0, y, sprite, colors.0, colors.1);
-    }
-    let text_y = y + sprite.len().saturating_sub(GLYPH_HEIGHT) / 2;
-    draw_text(
-        canvas,
-        canvas.width().saturating_sub(width),
-        text_y,
-        text,
-        text_color,
-    );
-}
-
-/// A thermometer beside the temperature in tenths of a degree, above a drop
-/// beside the relative humidity.
-pub fn render_indoor(canvas: &mut Canvas<'_>, reading: &Reading) {
-    let gap = 2;
-    let block = THERMOMETER.len() + gap + DROP.len();
-    let top = canvas.height().saturating_sub(block) / 2;
-
+/// A thermometer above the indoor temperature in tenths of a degree.
+pub fn render_temperature(canvas: &mut Canvas<'_>, reading: &Reading) {
     let tenths = reading.temperature_dc;
     let sign = if tenths < 0 { "-" } else { "" };
     let magnitude = tenths.unsigned_abs();
     let mut text: String<16> = String::new();
     // Cannot fail: the widest i32 gives "-214748364.8", 12 bytes.
     let _ = write!(text, "{sign}{}.{}", magnitude / 10, magnitude % 10);
-    let celsius = (tenths + if tenths < 0 { -5 } else { 5 }) / 10;
-    draw_icon_line(
+    draw_icon_over_text(
         canvas,
-        top,
         &THERMOMETER,
         (GLASS, MERCURY),
         &text,
-        temperature_color(celsius),
+        temperature_color(round_to_degree(tenths)),
     );
+}
 
-    text.clear();
+/// A drop above the indoor relative humidity.
+pub fn render_humidity(canvas: &mut Canvas<'_>, reading: &Reading) {
+    let mut text: String<8> = String::new();
+    // Cannot fail: at most "255%" is 4 bytes.
     let _ = write!(text, "{}%", reading.humidity);
-    draw_icon_line(
+    draw_icon_over_text(
         canvas,
-        top + THERMOMETER.len() + gap,
         &DROP,
-        (HUMIDITY_COLOR, HUMIDITY_COLOR),
+        (HUMIDITY_COLOR, DROP_HIGHLIGHT),
         &text,
         HUMIDITY_COLOR,
     );
 }
 
-/// Hours above minutes in large digits, centered.
-pub fn render_clock(canvas: &mut Canvas<'_>, hour: u8, minute: u8) {
-    let block_height = BIG_DIGIT_HEIGHT * 2 + 1;
+/// Hours above minutes in large digits, centered. The separator is a
+/// square in the free space between the four digits, so it touches none.
+pub fn render_clock(canvas: &mut Canvas<'_>, hour: u8, minute: u8, separator: bool) {
+    let gap = BIG_DIGIT_GAP;
+    let block_height = BIG_DIGIT_HEIGHT * 2 + gap;
     let x = canvas.width().saturating_sub(BIG_PAIR_WIDTH) / 2;
     let y = canvas.height().saturating_sub(block_height) / 2;
     draw_big_pair(canvas, x, y, hour, HOUR_COLOR);
-    draw_big_pair(canvas, x, y + BIG_DIGIT_HEIGHT + 1, minute, MINUTE_COLOR);
+    draw_big_pair(canvas, x, y + BIG_DIGIT_HEIGHT + gap, minute, MINUTE_COLOR);
+    if separator {
+        for dy in 0..gap {
+            for dx in 0..BIG_DIGIT_GAP {
+                canvas.set(
+                    x + BIG_DIGIT_WIDTH + dx,
+                    y + BIG_DIGIT_HEIGHT + dy,
+                    SEPARATOR_COLOR,
+                );
+            }
+        }
+    }
 }

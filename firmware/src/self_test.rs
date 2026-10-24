@@ -7,7 +7,9 @@ use crate::color::random_vivid;
 use crate::display::{Canvas, MatrixLayout};
 use crate::font::{GLYPH_HEIGHT, draw_text_centered};
 use crate::indoor::Reading;
-use crate::screens::{WifiStatus, render_clock, render_indoor, render_weather, render_wifi};
+use crate::screens::{
+    WifiStatus, render_clock, render_humidity, render_temperature, render_weather, render_wifi,
+};
 use crate::weather::{Condition, Observation};
 
 const TEST_BRIGHTNESS: u8 = 60;
@@ -176,7 +178,7 @@ where
     clear(pixels);
 
     let mut canvas = Canvas::new(pixels, layout);
-    render_clock(&mut canvas, 12, 34);
+    render_clock(&mut canvas, 12, 34, true);
     show(led, pixels);
     delay.delay_millis(1500);
 
@@ -198,17 +200,17 @@ where
         delay.delay_millis(600);
     }
 
-    clear(pixels);
-    let mut canvas = Canvas::new(pixels, layout);
-    render_indoor(
-        &mut canvas,
-        &Reading {
-            temperature_dc: 215,
-            humidity: 48,
-        },
-    );
-    show(led, pixels);
-    delay.delay_millis(1500);
+    let reading = Reading {
+        temperature_dc: 215,
+        humidity: 48,
+    };
+    for render in [render_temperature, render_humidity] {
+        clear(pixels);
+        let mut canvas = Canvas::new(pixels, layout);
+        render(&mut canvas, &reading);
+        show(led, pixels);
+        delay.delay_millis(1500);
+    }
 }
 
 /// Shows the Wi-Fi connection status.

@@ -154,7 +154,8 @@ schedule is not rebased.
 Pressing the BOOT button of the dev board (GPIO9) runs the LED self-test once,
 after which playback resumes with the next animation. The self-test ends with
 a preview of every screen: text, clock, the seven weather icons in quick
-succession, the indoor screen, and the Wi-Fi status.
+succession, the indoor temperature and humidity screens, and the Wi-Fi
+status.
 
 With a `[wifi]` section in the configuration, the firmware joins the network
 at boot and keeps reconnecting after drops. The first result is flashed on the
@@ -173,11 +174,11 @@ in whole degrees, colored from blue to red. It is skipped when the last
 answer is older than an hour.
 
 An SHT3x sensor on I2C (SDA on GPIO6, SCL on GPIO7, see `doc/wiring.md`
-section 8) is read every minute. The indoor screen shows a thermometer beside
-the temperature, to the tenth of a degree, above a drop beside the relative
-humidity. It needs neither Wi-Fi nor the clock, and is skipped when no
+section 8) is read every minute. Two screens show it: a thermometer above the
+temperature, to the tenth of a degree, and a drop above the relative
+humidity. They need neither Wi-Fi nor the clock, and are skipped when no
 reading succeeded in the last 5 minutes, so a frame without the sensor simply
-never shows it.
+never shows them.
 
 A GL5528 photoresistor on GPIO2 (see `doc/wiring.md` section 7) is sampled
 continuously and its voltage logged every 10 seconds. With a `[light]`
@@ -192,9 +193,9 @@ stays fixed.
 When `info_every` is set, an information screen is shown for 5 seconds after
 that many animations. Each screen has an availability condition, so it is
 skipped until its data exists: the clock waits for the first time sync, the
-weather for the first Open-Meteo answer, the indoor screen for the first
+weather for the first Open-Meteo answer, the indoor screens for the first
 sensor reading. Available screens alternate. Hours are drawn above minutes in
-large digits.
+large bold digits, with a separator blinking every second between them.
 
 Files whose dimensions differ from the matrix, or that fail validation, are
 logged and skipped. Without any playable animation the LED self-test runs

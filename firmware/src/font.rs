@@ -2,8 +2,8 @@
 //!
 //! A 3×5 font covers digits, upper-case letters and a few symbols; glyphs
 //! are 3 pixels wide except the narrow punctuation, with one blank column
-//! between glyphs. A separate 5×7 digit set is used where digits must be
-//! readable from across the room, such as the clock.
+//! between glyphs. A separate bold 6×7 digit set is used where digits must
+//! be readable from across the room, such as the clock.
 
 use smart_leds::RGB8;
 
@@ -114,43 +114,46 @@ fn draw_rows(canvas: &mut Canvas<'_>, x: usize, y: usize, rows: &[u8], width: u8
     }
 }
 
-pub const BIG_DIGIT_WIDTH: usize = 5;
+pub const BIG_DIGIT_WIDTH: usize = 6;
 pub const BIG_DIGIT_HEIGHT: usize = 7;
+/// Blank columns between the two digits of a pair.
+pub const BIG_DIGIT_GAP: usize = 2;
 
+/// Bold digits: vertical strokes two pixels wide, horizontal strokes one.
 const BIG_DIGITS: [[u8; BIG_DIGIT_HEIGHT]; 10] = [
     [
-        0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        0b011110, 0b110011, 0b110011, 0b110011, 0b110011, 0b110011, 0b011110,
     ],
     [
-        0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        0b001100, 0b011100, 0b001100, 0b001100, 0b001100, 0b001100, 0b011110,
     ],
     [
-        0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        0b011110, 0b110011, 0b000011, 0b000110, 0b001100, 0b011000, 0b111111,
     ],
     [
-        0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110,
+        0b011110, 0b110011, 0b000011, 0b001110, 0b000011, 0b110011, 0b011110,
     ],
     [
-        0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        0b000110, 0b001110, 0b011110, 0b110110, 0b111111, 0b000110, 0b000110,
     ],
     [
-        0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        0b111111, 0b110000, 0b111110, 0b000011, 0b000011, 0b110011, 0b011110,
     ],
     [
-        0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        0b001110, 0b011000, 0b110000, 0b111110, 0b110011, 0b110011, 0b011110,
     ],
     [
-        0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        0b111111, 0b000011, 0b000110, 0b001100, 0b001100, 0b001100, 0b001100,
     ],
     [
-        0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        0b011110, 0b110011, 0b110011, 0b011110, 0b110011, 0b110011, 0b011110,
     ],
     [
-        0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+        0b011110, 0b110011, 0b110011, 0b011111, 0b000011, 0b000110, 0b011100,
     ],
 ];
 
-/// Draws one 5×7 digit; values above 9 draw nothing.
+/// Draws one 6×7 digit; values above 9 draw nothing.
 pub fn draw_big_digit(canvas: &mut Canvas<'_>, x: usize, y: usize, digit: u8, color: RGB8) {
     if let Some(rows) = BIG_DIGITS.get(usize::from(digit)) {
         draw_rows(canvas, x, y, rows, BIG_DIGIT_WIDTH as u8, color);
@@ -158,13 +161,19 @@ pub fn draw_big_digit(canvas: &mut Canvas<'_>, x: usize, y: usize, digit: u8, co
 }
 
 /// Width of a two-digit number drawn with [`draw_big_pair`].
-pub const BIG_PAIR_WIDTH: usize = BIG_DIGIT_WIDTH * 2 + 1;
+pub const BIG_PAIR_WIDTH: usize = BIG_DIGIT_WIDTH * 2 + BIG_DIGIT_GAP;
 
-/// Draws `value` (0..=99) as two 5×7 digits with a one-pixel gap.
+/// Draws `value` (0..=99) as two 6×7 digits.
 pub fn draw_big_pair(canvas: &mut Canvas<'_>, x: usize, y: usize, value: u8, color: RGB8) {
     let value = value.min(99);
     draw_big_digit(canvas, x, y, value / 10, color);
-    draw_big_digit(canvas, x + BIG_DIGIT_WIDTH + 1, y, value % 10, color);
+    draw_big_digit(
+        canvas,
+        x + BIG_DIGIT_WIDTH + BIG_DIGIT_GAP,
+        y,
+        value % 10,
+        color,
+    );
 }
 
 /// Draws `text` horizontally centered on the canvas at row `y`.

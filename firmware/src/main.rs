@@ -65,6 +65,10 @@ const ERROR_BACKOFF: Duration = Duration::from_millis(500);
 /// How long an information screen stays on before animations resume.
 const INFO_SCREEN_TIME: Duration = Duration::from_millis(5_000);
 
+/// Redraw period of an information screen, short enough for the clock
+/// separator to blink in step with the seconds.
+const INFO_REFRESH: Duration = Duration::from_millis(100);
+
 /// How long the Wi-Fi result is shown after boot.
 const WIFI_STATUS_TIME: Duration = Duration::from_millis(1_500);
 
@@ -247,11 +251,18 @@ async fn main(spawner: Spawner) -> ! {
             match info_screens.pick(&clock) {
                 Some(screen) => {
                     info!("showing {} screen", screen);
-                    let mut canvas = Canvas::new(&mut pixels, &LAYOUT);
-                    if screens::render(screen, &mut canvas, &clock) && {
+                    let deadline = Instant::now() + INFO_SCREEN_TIME;
+                    let mut pressed = false;
+                    while !pressed && Instant::now() < deadline {
+                        let mut canvas = Canvas::new(&mut pixels, &LAYOUT);
+                        if !screens::render(screen, &mut canvas, &clock) {
+                            break;
+                        }
                         show(&mut led, &pixels);
-                        wait_or_press(INFO_SCREEN_TIME, &mut button).await
-                    } {
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        pressed = wait_or_press(remaining.min(INFO_REFRESH), &mut button).await;
+                    }
+                    if pressed {
                         info!("self-test button pressed");
                         self_test::run(&mut led, &LAYOUT, &mut pixels, &delay, net::wifi_status());
                     }
