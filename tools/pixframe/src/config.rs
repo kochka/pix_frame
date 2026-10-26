@@ -29,18 +29,25 @@ pub const KEY_LIGHT_DARK_MV: &str = "light_dark_mv";
 pub const KEY_LIGHT_BRIGHT_MV: &str = "light_bright_mv";
 pub const KEY_LIGHT_MIN: &str = "light_min";
 pub const KEY_LIGHT_MAX: &str = "light_max";
+pub const KEY_MIN_PLAY_MS: &str = "min_play_ms";
+pub const KEY_TEMP_UNIT: &str = "temp_unit";
+pub const KEY_HOUR_COLOR: &str = "hour_color";
+pub const KEY_MINUTE_COLOR: &str = "minute_color";
 
 /// 802.11 limits.
 const MAX_SSID_BYTES: usize = 32;
 const MAX_PASSWORD_BYTES: usize = 64;
 /// Longest IANA zone name is 32 characters today; leave headroom.
 const MAX_TIMEZONE_BYTES: usize = 48;
+/// Upper bound of `display.min_play_seconds`, ten minutes.
+const MAX_MIN_PLAY_SECONDS: f64 = 600.0;
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub display: Display,
+    pub clock: Option<Clock>,
     pub wifi: Option<Wifi>,
     pub location: Option<Location>,
     pub light: Option<Light>,
@@ -52,6 +59,68 @@ pub struct Display {
     /// Show an information screen after this many animations; 0 disables them.
     #[serde(default)]
     pub info_every: u8,
+    /// An animation loops until at least this long has been scheduled;
+    /// the firmware default applies when unset.
+    pub min_play_seconds: Option<f64>,
+    /// Unit of every temperature shown; Celsius when unset.
+    pub temperature_unit: Option<TemperatureUnit>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+pub enum TemperatureUnit {
+    #[serde(rename = "C")]
+    Celsius,
+    #[serde(rename = "F")]
+    Fahrenheit,
+}
+
+impl TemperatureUnit {
+    /// NVS encoding, shared with the firmware.
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Celsius => 0,
+            Self::Fahrenheit => 1,
+        }
+    }
+
+    fn from_u8(value: u8) -> Result<Self> {
+        match value {
+            0 => Ok(Self::Celsius),
+            1 => Ok(Self::Fahrenheit),
+            _ => bail!("unknown temperature unit {value}"),
+        }
+    }
+}
+
+/// Clock screen colors; the firmware defaults apply to unset ones.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Clock {
+    pub hour_color: Option<Color>,
+    pub minute_color: Option<Color>,
+}
+
+/// `#RRGGBB` in the TOML file, `0xRRGGBB` in NVS.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(try_from = "String")]
+pub struct Color(pub u32);
+
+impl TryFrom<String> for Color {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        text.strip_prefix('#')
+            .filter(|hex| hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+            .map(Self)
+            .ok_or_else(|| format!("invalid color {text:?}, expected \"#RRGGBB\""))
+    }
+}
+
+impl std::fmt::Display for Color {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{:06X}", self.0)
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -91,6 +160,11 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
+        if let Some(seconds) = self.display.min_play_seconds
+            && !(0.0..=MAX_MIN_PLAY_SECONDS).contains(&seconds)
+        {
+            bail!("display.min_play_seconds must be between 0 and {MAX_MIN_PLAY_SECONDS}");
+        }
         if let Some(wifi) = &self.wifi {
             if wifi.ssid.is_empty() || wifi.ssid.len() > MAX_SSID_BYTES {
                 bail!("wifi.ssid must be 1 to {MAX_SSID_BYTES} bytes");
@@ -139,6 +213,24 @@ impl Config {
             .map_err(|e| nvs_error(KEY_VERSION, e))?;
         nvs.set(&ns, &Key::from_str(KEY_INFO_EVERY), self.display.info_every)
             .map_err(|e| nvs_error(KEY_INFO_EVERY, e))?;
+        if let Some(seconds) = self.display.min_play_seconds {
+            nvs.set(&ns, &Key::from_str(KEY_MIN_PLAY_MS), to_ms(seconds))
+                .map_err(|e| nvs_error(KEY_MIN_PLAY_MS, e))?;
+        }
+        if let Some(unit) = self.display.temperature_unit {
+            nvs.set(&ns, &Key::from_str(KEY_TEMP_UNIT), unit.to_u8())
+                .map_err(|e| nvs_error(KEY_TEMP_UNIT, e))?;
+        }
+        if let Some(clock) = &self.clock {
+            if let Some(color) = clock.hour_color {
+                nvs.set(&ns, &Key::from_str(KEY_HOUR_COLOR), color.0)
+                    .map_err(|e| nvs_error(KEY_HOUR_COLOR, e))?;
+            }
+            if let Some(color) = clock.minute_color {
+                nvs.set(&ns, &Key::from_str(KEY_MINUTE_COLOR), color.0)
+                    .map_err(|e| nvs_error(KEY_MINUTE_COLOR, e))?;
+            }
+        }
         if let Some(wifi) = &self.wifi {
             set_str(&mut nvs, KEY_WIFI_SSID, &wifi.ssid)?;
             set_str(&mut nvs, KEY_WIFI_PASSWORD, &wifi.password)?;
@@ -190,6 +282,16 @@ impl Config {
         let info_every: u8 = nvs
             .get(&ns, &Key::from_str(KEY_INFO_EVERY))
             .map_err(|e| nvs_error(KEY_INFO_EVERY, e))?;
+        let min_play_seconds = optional::<u32>(&mut nvs, &ns, KEY_MIN_PLAY_MS)?.map(from_ms);
+        let temperature_unit = optional::<u8>(&mut nvs, &ns, KEY_TEMP_UNIT)?
+            .map(TemperatureUnit::from_u8)
+            .transpose()?;
+        let hour_color = optional::<u32>(&mut nvs, &ns, KEY_HOUR_COLOR)?.map(Color);
+        let minute_color = optional::<u32>(&mut nvs, &ns, KEY_MINUTE_COLOR)?.map(Color);
+        let clock = (hour_color.is_some() || minute_color.is_some()).then_some(Clock {
+            hour_color,
+            minute_color,
+        });
         let wifi = match optional::<String>(&mut nvs, &ns, KEY_WIFI_SSID)? {
             Some(ssid) => Some(Wifi {
                 ssid,
@@ -215,7 +317,12 @@ impl Config {
             None => None,
         };
         Ok(Self {
-            display: Display { info_every },
+            display: Display {
+                info_every,
+                min_play_seconds,
+                temperature_unit,
+            },
+            clock,
             wifi,
             location,
             light,
@@ -226,6 +333,27 @@ impl Config {
     pub fn summary(&self) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "info screen every: {}", self.display.info_every);
+        match self.display.min_play_seconds {
+            Some(seconds) => {
+                let _ = writeln!(out, "min play time: {seconds} s");
+            }
+            None => {
+                let _ = writeln!(out, "min play time: firmware default");
+            }
+        }
+        let unit = match self.display.temperature_unit {
+            Some(TemperatureUnit::Fahrenheit) => "F",
+            Some(TemperatureUnit::Celsius) | None => "C",
+        };
+        let _ = writeln!(out, "temperature unit: {unit}");
+        let color = |color: Option<Color>| color.map_or("default".to_string(), |c| c.to_string());
+        let clock = self.clock.as_ref();
+        let _ = writeln!(
+            out,
+            "clock colors: hours {}, minutes {}",
+            color(clock.and_then(|c| c.hour_color)),
+            color(clock.and_then(|c| c.minute_color))
+        );
         match &self.wifi {
             Some(wifi) => {
                 let _ = writeln!(
@@ -291,13 +419,27 @@ fn from_e6(micro: i32) -> f64 {
     f64::from(micro) / 1_000_000.0
 }
 
+/// Seconds to milliseconds; the range is validated so the cast cannot overflow.
+fn to_ms(seconds: f64) -> u32 {
+    (seconds * 1000.0).round() as u32
+}
+
+fn from_ms(ms: u32) -> f64 {
+    f64::from(ms) / 1000.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const FULL: &str = r#"
+    const FULL: &str = r##"
 [display]
 info_every = 5
+min_play_seconds = 4.5
+temperature_unit = "F"
+[clock]
+hour_color = "#FF2882"
+minute_color = "#00d2ff"
 [wifi]
 ssid = "Home"
 password = "hunter2!"
@@ -310,7 +452,7 @@ dark_mv = 400
 bright_mv = 2500
 min_brightness = 8
 max_brightness = 60
-"#;
+"##;
 
     #[test]
     fn roundtrips_through_nvs() {
@@ -337,6 +479,10 @@ max_brightness = 60
         );
         assert!(Config::parse("[display]\ninfo_every = 300").is_err());
         assert!(Config::parse("[unknown]\nx = 1").is_err());
+        assert!(Config::parse("[display]\nmin_play_seconds = -1").is_err());
+        assert!(Config::parse("[display]\ntemperature_unit = \"K\"").is_err());
+        assert!(Config::parse("[clock]\nhour_color = \"red\"").is_err());
+        assert!(Config::parse("[clock]\nhour_color = \"#12345\"").is_err());
         assert!(
             Config::parse(
                 "[light]\ndark_mv = 2500\nbright_mv = 400\nmin_brightness = 8\nmax_brightness = 60"

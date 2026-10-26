@@ -9,16 +9,15 @@ use heapless::String;
 use smart_leds::RGB8;
 
 use crate::clock::Clock;
+use crate::config::{Style, TemperatureUnit};
 use crate::display::Canvas;
 use crate::font::{
     BIG_DIGIT_GAP, BIG_DIGIT_HEIGHT, BIG_DIGIT_WIDTH, BIG_PAIR_WIDTH, GLYPH_HEIGHT, draw_big_pair,
-    draw_text_centered,
+    draw_text_centered, text_width,
 };
 use crate::indoor::{self, Reading};
 use crate::weather::{self, Condition, Observation};
 
-const HOUR_COLOR: RGB8 = RGB8::new(255, 200, 60);
-const MINUTE_COLOR: RGB8 = RGB8::new(90, 170, 255);
 const SEPARATOR_COLOR: RGB8 = RGB8::new(200, 200, 200);
 const LABEL_COLOR: RGB8 = RGB8::new(200, 200, 200);
 const OK_COLOR: RGB8 = RGB8::new(0, 200, 40);
@@ -109,33 +108,33 @@ fn available(screen: Screen, clock: &Clock) -> bool {
 
 /// Draws `screen` on a cleared canvas. Returns `false` when its data
 /// disappeared between `pick` and now, leaving the canvas blank.
-pub fn render(screen: Screen, canvas: &mut Canvas<'_>, clock: &Clock) -> bool {
+pub fn render(screen: Screen, canvas: &mut Canvas<'_>, clock: &Clock, style: &Style) -> bool {
     canvas.clear();
     match screen {
         Screen::Clock => match clock.local_time() {
             Some(time) => {
-                render_clock(canvas, time.hour, time.minute, time.second % 2 == 0);
+                render_clock(canvas, style, time.hour, time.minute, time.second % 2 == 0);
                 true
             }
             None => false,
         },
         Screen::Weather => match weather::current(clock.unix_time()) {
             Some(observation) => {
-                render_weather(canvas, &observation);
+                render_weather(canvas, style, &observation);
                 true
             }
             None => false,
         },
         Screen::Temperature => match indoor::current() {
             Some(reading) => {
-                render_temperature(canvas, &reading);
+                render_temperature(canvas, style, &reading);
                 true
             }
             None => false,
         },
         Screen::Humidity => match indoor::current() {
             Some(reading) => {
-                render_humidity(canvas, &reading);
+                render_humidity(canvas, style, &reading);
                 true
             }
             None => false,
@@ -270,12 +269,13 @@ fn temperature_color(celsius: i32) -> RGB8 {
 }
 
 /// Condition icon on top, the temperature in whole degrees below.
-pub fn render_weather(canvas: &mut Canvas<'_>, observation: &Observation) {
+pub fn render_weather(canvas: &mut Canvas<'_>, style: &Style, observation: &Observation) {
     let (sprite, primary, secondary) = icon(observation.condition);
     let celsius = round_to_degree(observation.temperature_dc);
-    let mut text: String<8> = String::new();
-    // Cannot fail: at most "-999°" is 6 bytes.
-    let _ = write!(text, "{celsius}°");
+    let degrees = round_to_degree(in_unit(observation.temperature_dc, style.temperature_unit));
+    let mut text: String<16> = String::new();
+    // Cannot fail: the widest i32 gives "-214748364°", 12 bytes.
+    let _ = write!(text, "{degrees}°");
     draw_icon_over_text(
         canvas,
         &sprite,
@@ -288,6 +288,17 @@ pub fn render_weather(canvas: &mut Canvas<'_>, observation: &Observation) {
 /// Rounds tenths of a degree to the nearest degree, away from zero.
 fn round_to_degree(tenths: i32) -> i32 {
     (tenths + if tenths < 0 { -5 } else { 5 }) / 10
+}
+
+/// Converts tenths of a degree Celsius to tenths in `unit`, rounded.
+fn in_unit(celsius_dc: i32, unit: TemperatureUnit) -> i32 {
+    match unit {
+        TemperatureUnit::Celsius => celsius_dc,
+        TemperatureUnit::Fahrenheit => {
+            let scaled = celsius_dc.saturating_mul(18);
+            (scaled + if scaled < 0 { -5 } else { 5 }) / 10 + 320
+        }
+    }
 }
 
 /// Draws a sprite above `text`, both horizontally centered, the block
@@ -356,25 +367,30 @@ fn draw_sprite<const W: usize>(
     }
 }
 
-/// A thermometer above the indoor temperature in tenths of a degree.
-pub fn render_temperature(canvas: &mut Canvas<'_>, reading: &Reading) {
-    let tenths = reading.temperature_dc;
+/// A thermometer above the indoor temperature in tenths of a degree, or
+/// whole degrees when the tenths do not fit (100 °F and above).
+pub fn render_temperature(canvas: &mut Canvas<'_>, style: &Style, reading: &Reading) {
+    let tenths = in_unit(reading.temperature_dc, style.temperature_unit);
     let sign = if tenths < 0 { "-" } else { "" };
     let magnitude = tenths.unsigned_abs();
     let mut text: String<16> = String::new();
     // Cannot fail: the widest i32 gives "-214748364.8", 12 bytes.
     let _ = write!(text, "{sign}{}.{}", magnitude / 10, magnitude % 10);
+    if text_width(&text) > canvas.width() {
+        text.clear();
+        let _ = write!(text, "{}°", round_to_degree(tenths));
+    }
     draw_icon_over_text(
         canvas,
         &THERMOMETER,
         (GLASS, MERCURY),
         &text,
-        temperature_color(round_to_degree(tenths)),
+        temperature_color(round_to_degree(reading.temperature_dc)),
     );
 }
 
 /// A drop above the indoor relative humidity.
-pub fn render_humidity(canvas: &mut Canvas<'_>, reading: &Reading) {
+pub fn render_humidity(canvas: &mut Canvas<'_>, _style: &Style, reading: &Reading) {
     let mut text: String<8> = String::new();
     // Cannot fail: at most "255%" is 4 bytes.
     let _ = write!(text, "{}%", reading.humidity);
@@ -389,13 +405,19 @@ pub fn render_humidity(canvas: &mut Canvas<'_>, reading: &Reading) {
 
 /// Hours above minutes in large digits, centered. The separator is a
 /// square in the free space between the four digits, so it touches none.
-pub fn render_clock(canvas: &mut Canvas<'_>, hour: u8, minute: u8, separator: bool) {
+pub fn render_clock(canvas: &mut Canvas<'_>, style: &Style, hour: u8, minute: u8, separator: bool) {
     let gap = BIG_DIGIT_GAP;
     let block_height = BIG_DIGIT_HEIGHT * 2 + gap;
     let x = canvas.width().saturating_sub(BIG_PAIR_WIDTH) / 2;
     let y = canvas.height().saturating_sub(block_height) / 2;
-    draw_big_pair(canvas, x, y, hour, HOUR_COLOR);
-    draw_big_pair(canvas, x, y + BIG_DIGIT_HEIGHT + gap, minute, MINUTE_COLOR);
+    draw_big_pair(canvas, x, y, hour, style.hour_color);
+    draw_big_pair(
+        canvas,
+        x,
+        y + BIG_DIGIT_HEIGHT + gap,
+        minute,
+        style.minute_color,
+    );
     if separator {
         for dy in 0..gap {
             for dx in 0..BIG_DIGIT_GAP {

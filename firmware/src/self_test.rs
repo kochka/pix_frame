@@ -4,6 +4,7 @@ use esp_hal::{delay::Delay, rng::Rng};
 use smart_leds::{RGB8, SmartLedsWrite};
 
 use crate::color::random_vivid;
+use crate::config::Style;
 use crate::display::{Canvas, MatrixLayout};
 use crate::font::{GLYPH_HEIGHT, draw_text_centered};
 use crate::indoor::Reading;
@@ -25,6 +26,7 @@ pub fn run<L, const N: usize>(
     pixels: &mut [RGB8; N],
     delay: &Delay,
     wifi: WifiStatus,
+    style: &Style,
 ) where
     L: SmartLedsWrite<Color = RGB8>,
     L::Error: Debug,
@@ -34,7 +36,7 @@ pub fn run<L, const N: usize>(
     test_single_vertical(led, layout, pixels, delay);
     test_random_blink(led, pixels, delay);
     test_random_fill(led, pixels, delay);
-    test_text(led, layout, pixels, delay);
+    test_text(led, layout, pixels, delay, style);
     test_wifi(led, layout, pixels, delay, wifi);
 }
 
@@ -162,8 +164,13 @@ where
 }
 
 /// Renders text and the clock layout through the fonts and the logical mapping.
-fn test_text<L>(led: &mut L, layout: &MatrixLayout, pixels: &mut [RGB8], delay: &Delay)
-where
+fn test_text<L>(
+    led: &mut L,
+    layout: &MatrixLayout,
+    pixels: &mut [RGB8],
+    delay: &Delay,
+    style: &Style,
+) where
     L: SmartLedsWrite<Color = RGB8>,
     L::Error: Debug,
 {
@@ -178,7 +185,7 @@ where
     clear(pixels);
 
     let mut canvas = Canvas::new(pixels, layout);
-    render_clock(&mut canvas, 12, 34, true);
+    render_clock(&mut canvas, style, 12, 34, true);
     show(led, pixels);
     delay.delay_millis(1500);
 
@@ -190,6 +197,7 @@ where
         let mut canvas = Canvas::new(pixels, layout);
         render_weather(
             &mut canvas,
+            style,
             &Observation {
                 temperature_dc,
                 condition,
@@ -207,7 +215,7 @@ where
     for render in [render_temperature, render_humidity] {
         clear(pixels);
         let mut canvas = Canvas::new(pixels, layout);
-        render(&mut canvas, &reading);
+        render(&mut canvas, style, &reading);
         show(led, pixels);
         delay.delay_millis(1500);
     }

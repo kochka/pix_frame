@@ -142,7 +142,7 @@ animations) and logs what it found over the serial port, including a warning
 when indexing stopped before the end of the bundle. It then plays in a
 random order: each cycle is a shuffle of every animation, and a new cycle never
 starts with the animation that just ended. An animation loops until at least
-3 seconds have been scheduled at a loop boundary, so short loops repeat and long
+`min_play_seconds` (3 by default) have been scheduled at a loop boundary, so short loops repeat and long
 ones play once in full.
 
 Frames are scheduled on cumulative deadlines from the first frame: the next
@@ -195,12 +195,13 @@ that many animations. Each screen has an availability condition, so it is
 skipped until its data exists: the clock waits for the first time sync, the
 weather for the first Open-Meteo answer, the indoor screens for the first
 sensor reading. Available screens alternate. Hours are drawn above minutes in
-large bold digits, with a separator blinking every second between them.
+large bold digits, pink above cyan unless `[clock]` sets other colors, with
+a separator blinking every second between them. Temperatures are shown in
+Celsius, or in Fahrenheit with `temperature_unit = "F"`.
 
 Files whose dimensions differ from the matrix, or that fail validation, are
 logged and skipped. Without any playable animation the LED self-test runs
-instead. The fixed brightness and the minimum play time are constants at the top
-of `firmware/src/main.rs`.
+instead. The fixed brightness is a constant at the top of `firmware/src/main.rs`.
 
 ## Using the `pxa` converter
 

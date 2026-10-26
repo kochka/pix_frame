@@ -3,12 +3,24 @@
 # Copy this file to `config.toml` (ignored by git, it holds your Wi-Fi
 # password), edit it, then write it to the frame with `mise run flash-config`.
 # Every section except [display] is optional: screens that need a missing
-# section are simply never shown.
+# section are simply never shown. Keys left out of [display] and [clock]
+# keep their default.
 
 [display]
 # Show an information screen (clock, weather...) after this many animations.
 # 0 disables information screens.
 info_every = 5
+# An animation loops until at least this many seconds have been scheduled,
+# so short loops repeat and long ones play once in full. Default 3.
+min_play_seconds = 3
+# Unit of every temperature shown: "C" (default) or "F".
+temperature_unit = "C"
+
+[clock]
+# Optional colors of the clock digits, "#RRGGBB". Defaults: pink hours above
+# cyan minutes.
+hour_color = "#FF2882"
+minute_color = "#00D2FF"
 
 [wifi]
 ssid = "MyNetwork"

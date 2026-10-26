@@ -3,9 +3,12 @@
 //! The image is produced on the PC by `pixframe config build`; the namespace,
 //! keys and types below are the contract with `tools/pixframe/src/config.rs`
 //! and must change together. Everything except `info_every` is optional:
-//! features whose section is missing simply stay off.
+//! features whose section is missing simply stay off, display settings
+//! whose key is missing keep their default.
 
 use alloc::string::String;
+
+use smart_leds::RGB8;
 
 use esp_nvs::error::Error as NvsError;
 use esp_nvs::platform::Platform;
@@ -25,14 +28,63 @@ const KEY_LIGHT_DARK_MV: &str = "light_dark_mv";
 const KEY_LIGHT_BRIGHT_MV: &str = "light_bright_mv";
 const KEY_LIGHT_MIN: &str = "light_min";
 const KEY_LIGHT_MAX: &str = "light_max";
+const KEY_MIN_PLAY_MS: &str = "min_play_ms";
+const KEY_TEMP_UNIT: &str = "temp_unit";
+const KEY_HOUR_COLOR: &str = "hour_color";
+const KEY_MINUTE_COLOR: &str = "minute_color";
 
-#[derive(Debug, Default)]
+/// An animation loops until at least this long has been scheduled.
+const DEFAULT_MIN_PLAY_MS: u32 = 3_000;
+
+#[derive(Debug)]
 pub struct Config {
     /// Show an information screen after this many animations; 0 disables them.
     pub info_every: u8,
+    /// An animation loops until at least this many milliseconds have been
+    /// scheduled at a loop boundary.
+    pub min_play_ms: u32,
+    pub style: Style,
     pub wifi: Option<Wifi>,
     pub location: Option<Location>,
     pub light: Option<Light>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            info_every: 0,
+            min_play_ms: DEFAULT_MIN_PLAY_MS,
+            style: Style::default(),
+            wifi: None,
+            location: None,
+            light: None,
+        }
+    }
+}
+
+/// How information screens look.
+#[derive(Clone, Copy, Debug)]
+pub struct Style {
+    pub temperature_unit: TemperatureUnit,
+    pub hour_color: RGB8,
+    pub minute_color: RGB8,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            temperature_unit: TemperatureUnit::Celsius,
+            hour_color: RGB8::new(255, 40, 130),
+            minute_color: RGB8::new(0, 210, 255),
+        }
+    }
+}
+
+/// Stored as a `u8`: 0 Celsius, 1 Fahrenheit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
+pub enum TemperatureUnit {
+    Celsius,
+    Fahrenheit,
 }
 
 #[derive(Debug)]
@@ -93,6 +145,20 @@ impl Config {
         }
 
         let info_every = optional(nvs, &ns, KEY_INFO_EVERY)?.unwrap_or(0);
+        let min_play_ms = optional(nvs, &ns, KEY_MIN_PLAY_MS)?.unwrap_or(DEFAULT_MIN_PLAY_MS);
+        let mut style = Style::default();
+        if let Some(unit) = optional::<P, u8>(nvs, &ns, KEY_TEMP_UNIT)? {
+            style.temperature_unit = match unit {
+                1 => TemperatureUnit::Fahrenheit,
+                _ => TemperatureUnit::Celsius,
+            };
+        }
+        if let Some(rgb) = optional(nvs, &ns, KEY_HOUR_COLOR)? {
+            style.hour_color = unpack_rgb(rgb);
+        }
+        if let Some(rgb) = optional(nvs, &ns, KEY_MINUTE_COLOR)? {
+            style.minute_color = unpack_rgb(rgb);
+        }
         let wifi = match optional::<P, String>(nvs, &ns, KEY_WIFI_SSID)? {
             Some(ssid) => Some(Wifi {
                 ssid,
@@ -120,11 +186,19 @@ impl Config {
 
         Ok(Self {
             info_every,
+            min_play_ms,
+            style,
             wifi,
             location,
             light,
         })
     }
+}
+
+/// `0xRRGGBB` to a color.
+fn unpack_rgb(rgb: u32) -> RGB8 {
+    let [_, r, g, b] = rgb.to_be_bytes();
+    RGB8::new(r, g, b)
 }
 
 fn optional<P: Platform, T>(

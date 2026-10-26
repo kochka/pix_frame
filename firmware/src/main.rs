@@ -26,7 +26,7 @@ use esp_radio::wifi::{AuthenticationMethodConfig, ControllerConfig, Interface, W
 use esp_storage::FlashStorage;
 use pix_frame_firmware::catalog::{Catalog, Entry, ScanEnd};
 use pix_frame_firmware::clock::Clock;
-use pix_frame_firmware::config::{Config, ConfigError, Wifi};
+use pix_frame_firmware::config::{Config, ConfigError, Style, Wifi};
 use pix_frame_firmware::display::{Canvas, MatrixLayout, Wiring};
 use pix_frame_firmware::indoor;
 use pix_frame_firmware::leds::SpiLeds;
@@ -54,10 +54,6 @@ const LED_COUNT: usize = LAYOUT.led_count();
 /// calibrated (`[light]` in the device configuration). Keep it modest: 256
 /// WS2815 at full white draw far more than a small supply can deliver.
 const BRIGHTNESS: u8 = 60;
-
-/// An animation loops until at least this much scheduled time has elapsed at
-/// a loop boundary, then the next one starts.
-const MIN_PLAY_TIME: Duration = Duration::from_millis(3_000);
 
 /// Pause after a failed animation so a broken bundle does not spin the log.
 const ERROR_BACKOFF: Duration = Duration::from_millis(500);
@@ -205,14 +201,14 @@ async fn main(spawner: Spawner) -> ! {
                 "partition '{}' not found, running the self-test",
                 ANIMATIONS_PARTITION
             );
-            self_test_forever(&mut led, &mut pixels, &delay);
+            self_test_forever(&mut led, &mut pixels, &delay, &config.style);
         }
     };
     let mut source = match FlashPartition::new(&mut flash, offset, len) {
         Ok(source) => source,
         Err(err) => {
             error!("partition '{}' unusable: {}", ANIMATIONS_PARTITION, err);
-            self_test_forever(&mut led, &mut pixels, &delay);
+            self_test_forever(&mut led, &mut pixels, &delay, &config.style);
         }
     };
 
@@ -226,7 +222,7 @@ async fn main(spawner: Spawner) -> ! {
     );
     if catalog.is_empty() {
         warn!("no animations found, running the self-test");
-        self_test_forever(&mut led, &mut pixels, &delay);
+        self_test_forever(&mut led, &mut pixels, &delay, &config.style);
     }
     if !matches!(end, ScanEnd::Terminator | ScanEnd::EndOfSource) {
         warn!("bundle indexing stopped early: {}", end);
@@ -235,6 +231,7 @@ async fn main(spawner: Spawner) -> ! {
     let mut random = || rng.random();
     let mut playlist = Playlist::new(catalog.len(), &mut random);
     let mut since_info: u8 = 0;
+    let min_play_time = Duration::from_millis(u64::from(config.min_play_ms));
 
     loop {
         if let Some(status) = net::take_announcement() {
@@ -242,7 +239,14 @@ async fn main(spawner: Spawner) -> ! {
             screens::render_wifi(&mut canvas, status);
             show(&mut led, &pixels);
             if wait_or_press(WIFI_STATUS_TIME, &mut button).await {
-                self_test::run(&mut led, &LAYOUT, &mut pixels, &delay, net::wifi_status());
+                self_test::run(
+                    &mut led,
+                    &LAYOUT,
+                    &mut pixels,
+                    &delay,
+                    net::wifi_status(),
+                    &config.style,
+                );
             }
         }
 
@@ -255,7 +259,7 @@ async fn main(spawner: Spawner) -> ! {
                     let mut pressed = false;
                     while !pressed && Instant::now() < deadline {
                         let mut canvas = Canvas::new(&mut pixels, &LAYOUT);
-                        if !screens::render(screen, &mut canvas, &clock) {
+                        if !screens::render(screen, &mut canvas, &clock, &config.style) {
                             break;
                         }
                         show(&mut led, &pixels);
@@ -264,7 +268,14 @@ async fn main(spawner: Spawner) -> ! {
                     }
                     if pressed {
                         info!("self-test button pressed");
-                        self_test::run(&mut led, &LAYOUT, &mut pixels, &delay, net::wifi_status());
+                        self_test::run(
+                            &mut led,
+                            &LAYOUT,
+                            &mut pixels,
+                            &delay,
+                            net::wifi_status(),
+                            &config.style,
+                        );
                     }
                 }
                 None => info!("no information screen available yet"),
@@ -284,11 +295,27 @@ async fn main(spawner: Spawner) -> ! {
             header.frame_count(),
             header.palette_size()
         );
-        match play(&mut led, &mut source, entry, &mut pixels, &mut button).await {
+        match play(
+            &mut led,
+            &mut source,
+            entry,
+            &mut pixels,
+            &mut button,
+            min_play_time,
+        )
+        .await
+        {
             Ok(PlayEnd::Finished) => since_info = since_info.saturating_add(1),
             Ok(PlayEnd::Interrupted) => {
                 info!("self-test button pressed");
-                self_test::run(&mut led, &LAYOUT, &mut pixels, &delay, net::wifi_status());
+                self_test::run(
+                    &mut led,
+                    &LAYOUT,
+                    &mut pixels,
+                    &delay,
+                    net::wifi_status(),
+                    &config.style,
+                );
             }
             Err(err) => {
                 warn!("animation at {=u32:#x}: {}", entry.offset, err);
@@ -379,8 +406,11 @@ fn load_config(flash: &mut FlashStorage<'_>, offset: u32, len: u32) -> Config {
     match Config::load(&mut nvs) {
         Ok(config) => {
             info!(
-                "config: info screen every {} animations, wifi {}, location {}",
+                "config: info screen every {} animations, animations play at least {} ms, \
+                 temperatures in {}, wifi {}, location {}",
                 config.info_every,
+                config.min_play_ms,
+                config.style.temperature_unit,
                 config.wifi.as_ref().map_or("not set", |w| w.ssid.as_str()),
                 config
                     .location
@@ -454,7 +484,7 @@ enum PlayEnd {
 /// when frame `i`'s duration has elapsed. Deadlines accumulate from the
 /// first frame, so decoding and LED transmission time never add drift. A
 /// late frame is shown as soon as it is ready; the schedule is not rebased.
-/// The animation loops until [`MIN_PLAY_TIME`] is reached at a loop boundary
+/// The animation loops until `min_play_time` is reached at a loop boundary
 /// and the last frame keeps its full duration before returning. The button
 /// is polled at every frame boundary. Waiting yields to the other tasks.
 #[allow(
@@ -467,6 +497,7 @@ async fn play<S: ByteSource>(
     entry: &Entry,
     pixels: &mut [RGB8; LED_COUNT],
     button: &mut Button,
+    min_play_time: Duration,
 ) -> Result<PlayEnd, PlayError> {
     let mut player = Player::<LED_COUNT>::open(source, entry, &LAYOUT)?;
     let mut deadline = Instant::now();
@@ -484,7 +515,7 @@ async fn play<S: ByteSource>(
         deadline += duration;
         scheduled += duration;
 
-        if frame.is_last && scheduled >= MIN_PLAY_TIME {
+        if frame.is_last && scheduled >= min_play_time {
             Timer::at(deadline).await;
             return Ok(PlayEnd::Finished);
         }
@@ -512,8 +543,13 @@ fn show(led: &mut LedDriver, pixels: &[RGB8]) {
     }
 }
 
-fn self_test_forever(led: &mut LedDriver, pixels: &mut [RGB8; LED_COUNT], delay: &Delay) -> ! {
+fn self_test_forever(
+    led: &mut LedDriver,
+    pixels: &mut [RGB8; LED_COUNT],
+    delay: &Delay,
+    style: &Style,
+) -> ! {
     loop {
-        self_test::run(led, &LAYOUT, pixels, delay, net::wifi_status());
+        self_test::run(led, &LAYOUT, pixels, delay, net::wifi_status(), style);
     }
 }
