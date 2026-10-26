@@ -320,19 +320,21 @@ fn draw_icon_over_text<const W: usize>(
 
 const GLASS: RGB8 = RGB8::new(150, 150, 160);
 const MERCURY: RGB8 = RGB8::new(230, 30, 20);
+const INDOOR_TEXT_COLOR: RGB8 = RGB8::new(230, 215, 190);
 const HUMIDITY_COLOR: RGB8 = RGB8::new(60, 160, 255);
 const DROP_HIGHLIGHT: RGB8 = RGB8::new(170, 220, 255);
 
-/// Thermometer, cells as in [`icon`]: 1 glass, 2 mercury.
-const THERMOMETER: [[u8; 5]; ICON_SIZE] = [
-    [0, 0, 1, 0, 0],
-    [0, 1, 0, 1, 0],
-    [0, 1, 0, 1, 0],
-    [0, 1, 2, 1, 0],
-    [0, 1, 2, 1, 0],
-    [1, 2, 2, 2, 1],
-    [1, 2, 2, 2, 1],
-    [0, 1, 1, 1, 0],
+/// Thermometer with a scale, cells as in [`icon`]: 1 glass and
+/// graduations, 2 mercury.
+const THERMOMETER: [[u8; 7]; ICON_SIZE] = [
+    [0, 0, 1, 0, 0, 0, 0],
+    [0, 1, 0, 1, 0, 1, 1],
+    [0, 1, 0, 1, 0, 0, 0],
+    [0, 1, 2, 1, 0, 1, 1],
+    [0, 1, 2, 1, 0, 0, 0],
+    [1, 2, 2, 2, 1, 0, 0],
+    [1, 2, 2, 2, 1, 0, 0],
+    [0, 1, 1, 1, 0, 0, 0],
 ];
 
 /// Water drop, cells as in [`icon`]: 1 water, 2 highlight.
@@ -367,15 +369,15 @@ fn draw_sprite<const W: usize>(
     }
 }
 
-/// A thermometer above the indoor temperature in tenths of a degree, or
-/// whole degrees when the tenths do not fit (100 °F and above).
+/// A thermometer above the indoor temperature in tenths of a degree, or whole
+/// degrees when the tenths do not fit (100 °F and above, -10 and below).
 pub fn render_temperature(canvas: &mut Canvas<'_>, style: &Style, reading: &Reading) {
     let tenths = in_unit(reading.temperature_dc, style.temperature_unit);
     let sign = if tenths < 0 { "-" } else { "" };
     let magnitude = tenths.unsigned_abs();
     let mut text: String<16> = String::new();
-    // Cannot fail: the widest i32 gives "-214748364.8", 12 bytes.
-    let _ = write!(text, "{sign}{}.{}", magnitude / 10, magnitude % 10);
+    // Cannot fail: the widest i32 gives "-214748364.8°", 14 bytes.
+    let _ = write!(text, "{sign}{}.{}°", magnitude / 10, magnitude % 10);
     if text_width(&text) > canvas.width() {
         text.clear();
         let _ = write!(text, "{}°", round_to_degree(tenths));
@@ -385,7 +387,7 @@ pub fn render_temperature(canvas: &mut Canvas<'_>, style: &Style, reading: &Read
         &THERMOMETER,
         (GLASS, MERCURY),
         &text,
-        temperature_color(round_to_degree(reading.temperature_dc)),
+        INDOOR_TEXT_COLOR,
     );
 }
 

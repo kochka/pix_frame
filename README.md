@@ -140,8 +140,9 @@ just plays animations.
 At boot the firmware reads the partition table, indexes the bundle (up to 256
 animations) and logs what it found over the serial port, including a warning
 when indexing stopped before the end of the bundle. It then plays in a
-random order: each cycle is a shuffle of every animation, and a new cycle never
-starts with the animation that just ended. An animation loops until at least
+random order: each cycle is a shuffle of every animation, and the first third
+of a new cycle never repeats the last third of the previous one, so at least
+a third of the catalog plays between two showings of the same animation. An animation loops until at least
 `min_play_seconds` (3 by default) have been scheduled at a loop boundary, so short loops repeat and long
 ones play once in full.
 
@@ -174,8 +175,8 @@ in whole degrees, colored from blue to red. It is skipped when the last
 answer is older than an hour.
 
 An SHT3x sensor on I2C (SDA on GPIO6, SCL on GPIO7, see `doc/wiring.md`
-section 8) is read every minute. Two screens show it: a thermometer above the
-temperature, to the tenth of a degree, and a drop above the relative
+section 8) is read every minute. Two screens show it: a thermometer above
+the temperature, to the tenth of a degree, and a drop above the relative
 humidity. They need neither Wi-Fi nor the clock, and are skipped when no
 reading succeeded in the last 5 minutes, so a frame without the sensor simply
 never shows them.
