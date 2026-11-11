@@ -1,7 +1,28 @@
 # pix-frame
 
-Firmware and tooling for playing animated pixel art on an RGB LED matrix driven
-by an ESP32-C6.
+A 16×16 pixel art frame that plays retro animations, with the time, the
+weather and the room temperature in between. It runs on an ESP32-C6 with a
+firmware written in Rust.
+
+[![Pix Frame on YouTube](https://img.youtube.com/vi/8LqMPComf-A/maxresdefault.jpg)](https://www.youtube.com/watch?v=8LqMPComf-A)
+
+## What it does
+
+- Plays your pixel art animations in random order, without showing the same
+  one again too soon.
+- Every few animations, shows an information screen:
+  - the time, set from the internet;
+  - the outdoor weather, with an icon and the temperature;
+  - the room temperature and humidity.
+- Follows the light in the room, dimmer in the evening and brighter in
+  daylight.
+- Works without Wi-Fi too: it then only plays animations and shows the
+  indoor screens.
+
+Everything is in this repository: the firmware, the PC tools, the carrier
+board (KiCad) and the 3D-printed rear structure.
+
+## How it works
 
 Animations are authored in the usual formats (GIF, APNG, WebP, PNG), converted
 on a PC into a small purpose-built binary format called **PXA**, and streamed
@@ -28,12 +49,16 @@ The current frame is:
 - an ESP32-C6-WROOM-1-N8 module (8 MB flash, Wi-Fi);
 - a 16×16 WS2815 12 V LED matrix, wired as a single serpentine chain;
 - the LED data line on GPIO18 (SPI with DMA), driven directly at 3.3 V;
-- a MINI560 buck converter supplying 5 V to the ESP32 side.
+- a MINI560 buck converter supplying 5 V to the ESP32 side;
+- an SHT3x temperature and humidity sensor on I2C;
+- a GL5528 photoresistor for the ambient light;
+- a push button that runs the LED self-test.
 
 The 16×16 size is a configuration, not a limit. Matrix dimensions and wiring
 are declared in one place in the firmware and the file format is dimension
 agnostic. See the [hardware reference](doc/wiring.md) for the circuit,
-external wiring, carrier PCB and assembly instructions.
+external wiring, carrier PCB and assembly instructions, and
+[`hardware/mechanical`](hardware/mechanical/) for the printed parts.
 
 ## Repository layout
 
@@ -47,7 +72,7 @@ external wiring, carrier PCB and assembly instructions.
 | `partitions.csv` | Flash partition table: firmware, reserved OTA space, `animations` data partition |
 | `doc/PXA_spec.md` | Authoritative specification of the PXA binary format |
 | `doc/wiring.md` | Hardware reference: circuit, wiring, PCB, assembly and commissioning |
-| `hardware` | KiCad 10 project for the carrier board |
+| `hardware` | KiCad 10 project for the carrier board, and the 3D-printed rear structure in `hardware/mechanical` |
 
 ## The PXA format in short
 
@@ -121,8 +146,8 @@ Reflashing the firmware does not touch the animations, and vice versa.
 
 ### Configuring the frame
 
-Optional features (information screens, and later Wi-Fi and weather) are
-driven by a configuration stored in the `nvs` partition. Copy
+Optional features (information screens, Wi-Fi, clock, weather, ambient
+light, display settings) are driven by a configuration stored in the `nvs` partition. Copy
 `config.example.toml` to `config.toml` (ignored by git, it holds the Wi-Fi
 password), edit it, then:
 
