@@ -6,6 +6,8 @@ firmware written in Rust.
 
 [![Pix Frame on YouTube](https://img.youtube.com/vi/8LqMPComf-A/maxresdefault.jpg)](https://www.youtube.com/watch?v=8LqMPComf-A)
 
+▶️ **[Watch the demo on YouTube](https://www.youtube.com/watch?v=8LqMPComf-A)**
+
 ## What it does
 
 - Plays your pixel art animations in random order, without showing the same
